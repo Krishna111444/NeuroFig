@@ -290,9 +290,19 @@ def run_group_comparison(df: pd.DataFrame, group_col: str, value_col: str,
     d = df[[group_col, value_col]].dropna()
     levels = order or list(pd.unique(d[group_col]))
     d = d[d[group_col].isin(levels)]
+
+    # Drop any group with no data (rather than crash deep inside scipy), and
+    # require at least two non-empty groups to make a comparison meaningful.
+    dropped = [g for g in levels if (d[group_col] == g).sum() == 0]
+    levels = [g for g in levels if g not in dropped]
+    if len(levels) < 2:
+        raise ValueError("Need at least 2 groups with data to compare "
+                         f"(usable groups: {levels or 'none'}).")
     samples = [d.loc[d[group_col] == g, value_col].values for g in levels]
 
     all_normal, warnings = _check_normality(levels, samples)
+    if dropped:
+        warnings.insert(0, f"Ignored group(s) with no data: {', '.join(map(str, dropped))}.")
 
     if method == "auto":
         use_nonparam = not all_normal
@@ -519,6 +529,9 @@ def run_paired_comparison(before: np.ndarray, after: np.ndarray,
     mask = ~(np.isnan(a) | np.isnan(b))
     a, b = a[mask], b[mask]
     diff = b - a
+    if len(diff) < 2:
+        raise ValueError("Need at least 2 complete before/after pairs "
+                         f"(found {len(diff)}).")
     warnings: list[str] = []
     if len(diff) < 3:
         warnings.append(f"Only n={len(diff)} complete pairs — results unreliable.")

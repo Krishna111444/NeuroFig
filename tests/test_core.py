@@ -244,6 +244,29 @@ def test_watermark_differs_from_clean():
     assert len(wm) > 1000 and wm != clean
 
 
+def test_robustness_guards():
+    import numpy as np
+    import pandas as pd
+    df = nc.load_table(SAMPLE)
+    # single group -> clear error, not an opaque scipy crash
+    try:
+        nc.run_group_comparison(df, "group", "open_arm_time_pct", order=["eYFP"])
+        assert False, "expected ValueError for a single group"
+    except ValueError:
+        pass
+    # an empty group is dropped (with a warning), comparison still runs
+    res = nc.run_group_comparison(df, "group", "open_arm_time_pct",
+                                  order=["eYFP", "ChR2", "GhostGroup"])
+    assert any("no data" in w for w in res.warnings)
+    assert res.test_name  # a real test still ran on the 2 usable groups
+    # paired with <2 pairs -> clear error
+    try:
+        nc.run_paired_comparison(np.array([1.0]), np.array([2.0]))
+        assert False, "expected ValueError for <2 pairs"
+    except ValueError:
+        pass
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):
