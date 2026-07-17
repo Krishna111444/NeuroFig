@@ -705,6 +705,23 @@ def make_timecourse_figure(time: np.ndarray,
     return fig
 
 
+def watermarked_png(fig: plt.Figure, text: str = "NeuroFig — preview",
+                    dpi: int = 110) -> bytes:
+    """Free-tier PNG: a diagonal watermark + reduced resolution.
+
+    The clean vector export is the paid deliverable; this lets people see exactly
+    what they'll get first. The watermark artist is removed after saving so the
+    same Figure can still be exported cleanly if the user later unlocks.
+    """
+    t = fig.text(0.5, 0.5, text, fontsize=26, color="0.5", alpha=0.28,
+                 ha="center", va="center", rotation=28, zorder=1000)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=dpi)
+    t.remove()
+    buf.seek(0)
+    return buf.read()
+
+
 def figure_to_bytes(fig: plt.Figure, fmt: str = "png", exact: bool = False) -> bytes:
     """Serialize a figure to bytes.
 

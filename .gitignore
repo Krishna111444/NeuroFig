@@ -5,8 +5,12 @@ __pycache__/
 venv/
 *.egg-info/
 
+# Secrets — never commit real keys (the .example template IS tracked)
+.streamlit/secrets.toml
+
 # Local artifacts
 _smoke.*
+_demo_*.png
 *.tmp
 
 # Starter archive (kept locally, not tracked)

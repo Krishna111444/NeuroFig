@@ -217,6 +217,33 @@ def test_preset_sets_font_size():
     nc.apply_preset("Default")  # reset for other tests
 
 
+def test_license_valid_expired_tampered():
+    import licensing as L
+    secret, now = "seller-secret", 1_700_000_000
+    key = L.make_license("buyer@lab.edu", 30, secret, issued_at=now)
+    ok, reason, info = L.verify_license(key, secret, now=now)
+    assert ok and reason == "ok" and info["e"] == "buyer@lab.edu"
+    # expired
+    assert L.verify_license(key, secret, now=now + 31 * 86400)[0] is False
+    # tampered signature / wrong secret cannot forge
+    assert L.verify_license(key, "not-the-secret", now=now)[0] is False
+    body, sig = key.split(".")
+    assert L.verify_license(body + ".AAAA", secret, now=now)[0] is False
+    # garbage never crashes
+    assert L.verify_license("junk", secret)[0] is False
+    assert L.verify_license("", secret)[0] is False
+
+
+def test_watermark_differs_from_clean():
+    df = nc.load_table(SAMPLE)
+    order = ["eYFP", "ChR2", "ChR2+Antagonist"]
+    res = nc.run_group_comparison(df, "group", "open_arm_time_pct", order=order)
+    fig = nc.make_group_figure(df, "group", "open_arm_time_pct", order=order, stat=res)
+    wm = nc.watermarked_png(fig)
+    clean = nc.figure_to_bytes(fig, "png")
+    assert len(wm) > 1000 and wm != clean
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):

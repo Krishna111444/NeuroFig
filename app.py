@@ -6,7 +6,11 @@ This is the MVP: upload -> confirm columns -> get figure + stats -> download.
 The paywall, accounts, and the plain-English/AI layer are added on top later
 (see README.md "Build roadmap").
 """
+import os
+
 import streamlit as st
+
+import licensing
 import neurofig_core as nc
 
 st.set_page_config(page_title="NeuroFig — data to publication figure", layout="wide")
@@ -14,6 +18,37 @@ st.set_page_config(page_title="NeuroFig — data to publication figure", layout=
 st.title("NeuroFig")
 st.caption("Upload your data → get a journal-ready figure with the correct statistics. "
            "Colourblind-safe, vector export, no coding.")
+
+
+def _secret(name: str, default: str = "") -> str:
+    """Read config from Streamlit secrets first, then environment."""
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return os.environ.get(name, default)
+
+
+# ---- paywall: unlock clean exports with a license key ----------------------
+_LICENSE_SECRET = _secret("NEUROFIG_LICENSE_SECRET")
+_BUY_URL = _secret("NEUROFIG_BUY_URL")  # your Lemon Squeezy / Razorpay payment link
+
+with st.sidebar:
+    st.header("Clean exports")
+    st.write("Free preview is watermarked. Unlock clean vector (PDF/SVG) downloads:")
+    _key = st.text_input("License key", type="password", placeholder="paste your key")
+    unlocked, _reason = False, ""
+    if _key:
+        if not _LICENSE_SECRET:
+            _reason = "Licensing not configured on this server."
+        else:
+            unlocked, _reason, _info = licensing.verify_license(_key, _LICENSE_SECRET)
+        st.success("Unlocked — clean exports enabled.") if unlocked else st.error(f"Key rejected: {_reason}")
+    if not unlocked and _BUY_URL:
+        st.link_button("Buy a license", _BUY_URL)
+    st.caption("Privacy: your data is processed to make the figure and is **not** used "
+               "for training and **not** stored after your session.")
 
 # ---- 1. upload -------------------------------------------------------------
 up = st.file_uploader("Upload a CSV or Excel file (long format: one column of groups, "
@@ -95,18 +130,22 @@ if st.button("Generate figure", type="primary") and order:
         st.table([{"Group 1": p["g1"], "Group 2": p["g2"],
                    "p-value": p["p_text"], "Significance": p["stars"]} for p in stat.pairwise])
 
-    # ---- 4. download (vector = the real journal deliverable) --------------
-    # exact=True preserves the journal column width to the millimetre.
-    st.write(f"**Download** — sized to {width_mm:.0f} mm ({preset}, {columns} column)")
-    d1, d2, d3 = st.columns(3)
-    d1.download_button("PNG (400 dpi)", nc.figure_to_bytes(fig, "png", exact=True),
-                       "figure.png", "image/png")
-    d2.download_button("PDF (vector)", nc.figure_to_bytes(fig, "pdf", exact=True),
-                       "figure.pdf", "application/pdf")
-    d3.download_button("SVG (vector)", nc.figure_to_bytes(fig, "svg", exact=True),
-                       "figure.svg", "image/svg+xml")
-
-    # ---- 5. where the paywall goes ---------------------------------------
+    # ---- 4. download — free preview watermarked; clean exports gated -------
     st.divider()
-    st.info("💡 Build note: this is where a paywall gates the high-res / no-watermark "
-            "download. Free = watermarked preview; paid = clean vector files.")
+    if unlocked:
+        # exact=True preserves the journal column width to the millimetre.
+        st.write(f"**Clean download** — sized to {width_mm:.0f} mm ({preset}, {columns} column)")
+        d1, d2, d3 = st.columns(3)
+        d1.download_button("PNG (400 dpi)", nc.figure_to_bytes(fig, "png", exact=True),
+                           "figure.png", "image/png")
+        d2.download_button("PDF (vector)", nc.figure_to_bytes(fig, "pdf", exact=True),
+                           "figure.pdf", "application/pdf")
+        d3.download_button("SVG (vector)", nc.figure_to_bytes(fig, "svg", exact=True),
+                           "figure.svg", "image/svg+xml")
+    else:
+        st.write("**Free preview** (watermarked). Unlock clean vector exports in the sidebar.")
+        st.download_button("Download watermarked PNG",
+                           nc.watermarked_png(fig, "NeuroFig — preview"),
+                           "figure_preview.png", "image/png")
+        if _BUY_URL:
+            st.link_button("Get clean PDF/SVG — buy a license", _BUY_URL)

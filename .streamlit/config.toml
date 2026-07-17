@@ -1,0 +1,12 @@
+[server]
+# Researchers upload data files; allow a comfortable size, keep usage stats off.
+maxUploadSize = 50
+enableXsrfProtection = true
+gatherUsageStats = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#0072B2"
