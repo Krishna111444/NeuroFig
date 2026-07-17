@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Local artifacts
+_smoke.*
+*.tmp
+
+# Starter archive (kept locally, not tracked)
+neurofig_starter/
+neurofig_starter.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
