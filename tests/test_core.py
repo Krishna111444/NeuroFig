@@ -187,6 +187,36 @@ def test_timecourse_from_wide_shape():
     assert m.shape == (2, 3)  # 2 subjects x 3 timepoints
 
 
+def test_journal_width_is_exact():
+    df = nc.load_table(SAMPLE)
+    order = ["eYFP", "ChR2", "ChR2+Antagonist"]
+    res = nc.run_group_comparison(df, "group", "open_arm_time_pct", order=order)
+    fig = nc.make_group_figure(df, "group", "open_arm_time_pct", order=order,
+                               stat=res, preset="Nature", width_mm=89.0)
+    w_in = fig.get_size_inches()[0]
+    assert abs(w_in - 89.0 / 25.4) < 1e-6  # exact to the micrometre
+
+
+def test_journal_width_lookup_and_fallback():
+    assert nc.journal_width_mm("Nature", "single") == 89.0
+    assert nc.journal_width_mm("Nature", "double") == 183.0
+    assert nc.journal_width_mm("Science", "single") == 55.0
+    # unknown journal falls back to Default, does not raise
+    assert nc.journal_width_mm("MadeUpJournal") == nc.journal_width_mm("Default")
+
+
+def test_preset_sets_font_size():
+    import matplotlib
+    nc.apply_preset("Nature")
+    assert matplotlib.rcParams["font.size"] == 7
+    nc.apply_preset("Default")
+    assert matplotlib.rcParams["font.size"] == 8
+    # DejaVu Sans is always the final fallback so text never renders as boxes
+    nc.apply_preset("Cell")
+    assert "DejaVu Sans" in matplotlib.rcParams["font.sans-serif"]
+    nc.apply_preset("Default")  # reset for other tests
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):

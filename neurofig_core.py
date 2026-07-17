@@ -30,15 +30,58 @@ OKABE_ITO = ["#0072B2", "#D55E00", "#009E73", "#CC79A7",
              "#E69F00", "#56B4E9", "#F0E442", "#7F7F7F"]
 
 JOURNAL_STYLE = {
-    "font.family": "DejaVu Sans", "font.size": 8,
     "axes.linewidth": 0.8, "axes.spines.top": False, "axes.spines.right": False,
     "xtick.major.width": 0.8, "ytick.major.width": 0.8,
     "savefig.dpi": 400, "figure.dpi": 130, "pdf.fonttype": 42, "ps.fonttype": 42,
 }
 
+# Journal figure specs. Column widths in mm are from each journal's published
+# author guidelines; base font size follows their typical label size. Arial/
+# Helvetica are the requested faces — matplotlib falls back down the list to the
+# always-present DejaVu Sans if they are not installed (no crash, no ugly boxes).
+_SANS = ["Arial", "Helvetica", "DejaVu Sans"]
+JOURNAL_PRESETS: dict[str, dict] = {
+    "Default": {"single_mm": 89,  "double_mm": 183, "font_pt": 8, "family": _SANS},
+    "Nature":  {"single_mm": 89,  "double_mm": 183, "font_pt": 7, "family": _SANS},
+    "Cell":    {"single_mm": 85,  "double_mm": 174, "font_pt": 7, "family": _SANS},
+    "eLife":   {"single_mm": 85,  "double_mm": 170, "font_pt": 8, "family": _SANS},
+    "Science": {"single_mm": 55,  "double_mm": 120, "font_pt": 7, "family": _SANS},
+}
 
-def apply_style():
-    mpl.rcParams.update(JOURNAL_STYLE)
+_ACTIVE_PRESET = "Default"
+
+
+def _rcparams_for(name: str) -> dict:
+    p = JOURNAL_PRESETS.get(name, JOURNAL_PRESETS["Default"])
+    rc = dict(JOURNAL_STYLE)
+    rc.update({"font.family": "sans-serif", "font.sans-serif": p["family"],
+               "font.size": p["font_pt"]})
+    return rc
+
+
+def apply_preset(name: str = "Default") -> None:
+    """Select a journal style (fonts + sizes). Width is applied per-figure."""
+    global _ACTIVE_PRESET
+    _ACTIVE_PRESET = name if name in JOURNAL_PRESETS else "Default"
+    mpl.rcParams.update(_rcparams_for(_ACTIVE_PRESET))
+
+
+def apply_style() -> None:
+    """Apply the currently-active preset's rcParams (figure functions call this)."""
+    mpl.rcParams.update(_rcparams_for(_ACTIVE_PRESET))
+
+
+def journal_width_mm(name: str, columns: str = "single") -> float:
+    p = JOURNAL_PRESETS.get(name, JOURNAL_PRESETS["Default"])
+    return float(p["double_mm"] if columns == "double" else p["single_mm"])
+
+
+def set_width_mm(fig: plt.Figure, width_mm: float) -> plt.Figure:
+    """Resize a figure to an exact width in mm, preserving its aspect ratio."""
+    w_in = width_mm / 25.4
+    cw, ch = fig.get_size_inches()
+    fig.set_size_inches(w_in, w_in * ch / cw)
+    return fig
 
 
 # ---------------------------------------------------------------- data understanding
@@ -333,14 +376,17 @@ def run_group_comparison(df: pd.DataFrame, group_col: str, value_col: str,
 def make_group_figure(df: pd.DataFrame, group_col: str, value_col: str,
                       order: list[str] | None = None,
                       stat: StatResult | None = None,
-                      ylabel: str | None = None, title: str = "") -> plt.Figure:
+                      ylabel: str | None = None, title: str = "",
+                      preset: str | None = None, width_mm: float | None = None) -> plt.Figure:
     """Bar (mean±SEM) + individual points + significance brackets. Returns a Figure."""
-    apply_style()
+    apply_preset(preset) if preset else apply_style()
     d = df[[group_col, value_col]].dropna()
     levels = order or list(pd.unique(d[group_col]))
     colors = {g: OKABE_ITO[i % len(OKABE_ITO)] for i, g in enumerate(levels)}
 
     fig, ax = plt.subplots(figsize=(0.9 * len(levels) + 1.2, 3.0))
+    if width_mm:
+        set_width_mm(fig, width_mm)
     means, data_max, data_min = [], -np.inf, np.inf
     for i, g in enumerate(levels):
         v = d.loc[d[group_col] == g, value_col].values
@@ -402,14 +448,15 @@ def _annotate_brackets(ax, stat: "StatResult | None", idx: dict,
 def make_box_figure(df: pd.DataFrame, group_col: str, value_col: str,
                     order: list[str] | None = None, kind: str = "box",
                     stat: StatResult | None = None,
-                    ylabel: str | None = None, title: str = "") -> plt.Figure:
+                    ylabel: str | None = None, title: str = "",
+                    preset: str | None = None, width_mm: float | None = None) -> plt.Figure:
     """Box or violin plot with overlaid individual points + significance brackets.
 
     kind="box"    -> median/IQR box (robust; the honest choice for non-normal data).
     kind="violin" -> kernel-density violin with the same points overlaid.
     Pairs naturally with the non-parametric tests.
     """
-    apply_style()
+    apply_preset(preset) if preset else apply_style()
     d = df[[group_col, value_col]].dropna()
     levels = order or list(pd.unique(d[group_col]))
     d = d[d[group_col].isin(levels)]
@@ -417,6 +464,8 @@ def make_box_figure(df: pd.DataFrame, group_col: str, value_col: str,
     data = [d.loc[d[group_col] == g, value_col].values for g in levels]
 
     fig, ax = plt.subplots(figsize=(0.9 * len(levels) + 1.2, 3.0))
+    if width_mm:
+        set_width_mm(fig, width_mm)
     positions = range(len(levels))
 
     if kind == "violin":
@@ -511,19 +560,22 @@ def run_paired_comparison(before: np.ndarray, after: np.ndarray,
 def make_paired_figure(before: np.ndarray, after: np.ndarray,
                        labels: tuple[str, str] = ("Before", "After"),
                        stat: StatResult | None = None,
-                       ylabel: str = "value", title: str = "") -> plt.Figure:
+                       ylabel: str = "value", title: str = "",
+                       preset: str | None = None, width_mm: float | None = None) -> plt.Figure:
     """Before/after plot: each subject is a faint connecting line; means in bold.
 
     The connecting lines are the whole point of a paired figure — they show the
     within-subject change a bar chart hides.
     """
-    apply_style()
+    apply_preset(preset) if preset else apply_style()
     a = np.asarray(before, dtype=float); b = np.asarray(after, dtype=float)
     mask = ~(np.isnan(a) | np.isnan(b))
     a, b = a[mask], b[mask]
     c0, c1 = OKABE_ITO[0], OKABE_ITO[1]
 
     fig, ax = plt.subplots(figsize=(2.6, 3.0))
+    if width_mm:
+        set_width_mm(fig, width_mm)
     for ai, bi in zip(a, b):
         ax.plot([0, 1], [ai, bi], color="0.6", lw=0.7, alpha=0.7, zorder=1)
     ax.scatter(np.zeros_like(a), a, s=16, facecolor="white", edgecolor=c0, linewidth=1.0, zorder=3)
@@ -609,7 +661,8 @@ def make_timecourse_figure(time: np.ndarray,
                            ylabel: str = "ΔF/F (%)", xlabel: str = "Time (s)",
                            error: str = "sem",
                            event_window=None, event_label: str | None = None,
-                           title: str = "") -> plt.Figure:
+                           title: str = "",
+                           preset: str | None = None, width_mm: float | None = None) -> plt.Figure:
     """Mean±SEM (or SD) trace with shaded band; one line per condition.
 
     traces_by_condition : {label -> array (n_subjects × n_time)}.
@@ -617,9 +670,11 @@ def make_timecourse_figure(time: np.ndarray,
                           a (t0, t1) tuple shades the stimulus epoch.
     A baseline at ΔF/F = 0 is drawn because ΔF/F is defined relative to baseline.
     """
-    apply_style()
+    apply_preset(preset) if preset else apply_style()
     time = np.asarray(time, dtype=float)
     fig, ax = plt.subplots(figsize=(4.2, 2.8))
+    if width_mm:
+        set_width_mm(fig, width_mm)
 
     ax.axhline(0, color="0.7", lw=0.6, zorder=1)
     if event_window is not None:
@@ -650,8 +705,19 @@ def make_timecourse_figure(time: np.ndarray,
     return fig
 
 
-def figure_to_bytes(fig: plt.Figure, fmt: str = "png") -> bytes:
+def figure_to_bytes(fig: plt.Figure, fmt: str = "png", exact: bool = False) -> bytes:
+    """Serialize a figure to bytes.
+
+    exact=False (default): trim surrounding whitespace (bbox_inches='tight') —
+        best for previews and general use.
+    exact=True: preserve the figure's exact canvas size, so a width set via
+        width_mm is honoured to the millimetre in the output file. Use this for
+        journal submission where the column width must be exact.
+    """
     buf = io.BytesIO()
-    fig.savefig(buf, format=fmt, bbox_inches="tight", facecolor="white")
+    if exact:
+        fig.savefig(buf, format=fmt, facecolor="white")
+    else:
+        fig.savefig(buf, format=fmt, bbox_inches="tight", facecolor="white")
     buf.seek(0)
     return buf.read()

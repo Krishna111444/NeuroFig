@@ -65,20 +65,27 @@ _method = {"Automatic (recommended)": "auto",
            "Force parametric (t-test / ANOVA)": "parametric",
            "Force non-parametric (rank-based)": "nonparametric"}[test_choice]
 
+j1, j2 = st.columns(2)
+preset = j1.selectbox("Journal style", list(nc.JOURNAL_PRESETS.keys()),
+                      help="Sets fonts and the exact figure width for that journal's "
+                           "single/double column. Vector downloads are sized to the mm.")
+columns = j2.selectbox("Column width", ["single", "double"])
+width_mm = nc.journal_width_mm(preset, columns)
+st.caption(f"Figure will export at **{width_mm:.0f} mm** wide ({preset}, {columns} column).")
+
 # ---- 3. run + render -------------------------------------------------------
 if st.button("Generate figure", type="primary") and order:
     stat = nc.run_group_comparison(df, group_col, value_col, order=order, method=_method)
     for w in stat.warnings:
         st.warning(w)
+    _kw = dict(order=order, stat=stat, ylabel=ylabel, title=title,
+               preset=preset, width_mm=width_mm)
     if plot_type == "Box plot":
-        fig = nc.make_box_figure(df, group_col, value_col, order=order, kind="box",
-                                 stat=stat, ylabel=ylabel, title=title)
+        fig = nc.make_box_figure(df, group_col, value_col, kind="box", **_kw)
     elif plot_type == "Violin plot":
-        fig = nc.make_box_figure(df, group_col, value_col, order=order, kind="violin",
-                                 stat=stat, ylabel=ylabel, title=title)
+        fig = nc.make_box_figure(df, group_col, value_col, kind="violin", **_kw)
     else:
-        fig = nc.make_group_figure(df, group_col, value_col, order=order,
-                                   stat=stat, ylabel=ylabel, title=title)
+        fig = nc.make_group_figure(df, group_col, value_col, **_kw)
     st.pyplot(fig, use_container_width=False)
 
     _posthoc = f" · post-hoc: {stat.posthoc_name}" if stat.posthoc_name and len(order) > 2 else ""
@@ -89,10 +96,15 @@ if st.button("Generate figure", type="primary") and order:
                    "p-value": p["p_text"], "Significance": p["stars"]} for p in stat.pairwise])
 
     # ---- 4. download (vector = the real journal deliverable) --------------
+    # exact=True preserves the journal column width to the millimetre.
+    st.write(f"**Download** — sized to {width_mm:.0f} mm ({preset}, {columns} column)")
     d1, d2, d3 = st.columns(3)
-    d1.download_button("Download PNG", nc.figure_to_bytes(fig, "png"), "figure.png", "image/png")
-    d2.download_button("Download PDF (vector)", nc.figure_to_bytes(fig, "pdf"), "figure.pdf", "application/pdf")
-    d3.download_button("Download SVG (vector)", nc.figure_to_bytes(fig, "svg"), "figure.svg", "image/svg+xml")
+    d1.download_button("PNG (400 dpi)", nc.figure_to_bytes(fig, "png", exact=True),
+                       "figure.png", "image/png")
+    d2.download_button("PDF (vector)", nc.figure_to_bytes(fig, "pdf", exact=True),
+                       "figure.pdf", "application/pdf")
+    d3.download_button("SVG (vector)", nc.figure_to_bytes(fig, "svg", exact=True),
+                       "figure.svg", "image/svg+xml")
 
     # ---- 5. where the paywall goes ---------------------------------------
     st.divider()
