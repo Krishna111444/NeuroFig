@@ -142,6 +142,26 @@ def wide_to_long(df: pd.DataFrame, value_cols: list[str],
     return long.dropna(subset=[value_name]).reset_index(drop=True)
 
 
+def make_entry_template(groups: list[str], n_rows: int = 8) -> pd.DataFrame:
+    """An empty 'one column per group' grid for typing/pasting data into the UI."""
+    return pd.DataFrame({g: [None] * n_rows for g in groups})
+
+
+def entered_wide_to_long(df: pd.DataFrame, group_cols: list[str] | None = None,
+                         group_name: str = "group",
+                         value_name: str = "value") -> pd.DataFrame:
+    """Turn a hand-typed wide grid into clean long data.
+
+    Coerces text to numbers (bad cells -> dropped, not crashed), removes blank
+    cells, and melts to long format. This is the path for users who type or
+    paste data instead of uploading a file.
+    """
+    cols = group_cols or list(df.columns)
+    numeric = df[cols].apply(pd.to_numeric, errors="coerce")
+    long = numeric.melt(var_name=group_name, value_name=value_name)
+    return long.dropna(subset=[value_name]).reset_index(drop=True)
+
+
 def infer_columns(df: pd.DataFrame) -> ColumnGuess:
     """Best-effort guess of which column is the grouping factor and which the measure.
 
@@ -714,6 +734,66 @@ def make_timecourse_figure(time: np.ndarray,
 
     fig.text(0.5, -0.04, f"line = mean; shading = ±{error.upper()} across subjects",
              ha="center", va="top", fontsize=6.2, color="0.25")
+    fig.tight_layout()
+    return fig
+
+
+def customize_figure(fig: plt.Figure, *,
+                     title: str | None = None, title_loc: str | None = None,
+                     title_pad: float | None = None,
+                     xlabel: str | None = None, ylabel: str | None = None,
+                     xtick_labels: list[str] | None = None,
+                     legend_labels: list[str] | None = None,
+                     legend_loc: str | None = None, show_legend: bool | None = None,
+                     title_size: float | None = None, label_size: float | None = None,
+                     tick_size: float | None = None) -> plt.Figure:
+    """Edit a figure's text after it is built — the app's 'generate then tweak' loop.
+
+    Operates on the main axes. Everything is optional; only what you pass changes.
+    - title / title_loc ('left'|'center'|'right') / title_pad : edit and MOVE the title
+    - xlabel / ylabel                                         : edit axis labels
+    - xtick_labels                                            : rename the groups on the x-axis
+    - legend_labels / legend_loc / show_legend               : edit, move, or hide the legend
+    - *_size                                                  : font sizes
+    Re-rendering is instant, so this backs interactive editing in the UI.
+    """
+    ax = fig.axes[0]
+
+    if title is not None or title_loc is not None or title_pad is not None:
+        loc = title_loc or "left"
+        cur = title if title is not None else ax.get_title(loc=loc) or ax.get_title()
+        kw = {"loc": loc, "fontweight": "bold"}
+        if title_pad is not None:
+            kw["pad"] = title_pad
+        if title_size is not None:
+            kw["fontsize"] = title_size
+        ax.set_title(cur, **kw)
+
+    if xlabel is not None:
+        ax.set_xlabel(xlabel, **({"fontsize": label_size} if label_size else {}))
+    if ylabel is not None:
+        ax.set_ylabel(ylabel, **({"fontsize": label_size} if label_size else {}))
+
+    if xtick_labels is not None:
+        ticks = ax.get_xticks()
+        ax.set_xticks(ticks[:len(xtick_labels)])
+        ax.set_xticklabels(xtick_labels)
+
+    if tick_size is not None:
+        ax.tick_params(labelsize=tick_size)
+
+    leg = ax.get_legend()
+    want_legend = show_legend if show_legend is not None else (leg is not None)
+    if want_legend and (legend_labels is not None or legend_loc is not None or show_legend):
+        handles, cur_labels = ax.get_legend_handles_labels()
+        labels = legend_labels if legend_labels is not None else cur_labels
+        if handles:
+            ax.legend(handles[:len(labels)], labels, frameon=False,
+                      loc=legend_loc or "best",
+                      fontsize=(tick_size or 6.5))
+    elif show_legend is False and leg is not None:
+        leg.remove()
+
     fig.tight_layout()
     return fig
 

@@ -267,6 +267,33 @@ def test_robustness_guards():
         pass
 
 
+def test_entered_wide_to_long_coerces_and_cleans():
+    import pandas as pd
+    grid = pd.DataFrame({"Control": ["1.0", "2.0", "", "oops"],
+                         "Treated": ["3.5", "", "4.5", "5.0"]})
+    long = nc.entered_wide_to_long(grid)
+    assert set(long["group"]) == {"Control", "Treated"}
+    # "" and "oops" dropped; 3 + 3 - 2 = 5 valid numbers remain
+    assert len(long) == 5
+    assert long["value"].dtype.kind == "f"
+    # template has the requested shape
+    tmpl = nc.make_entry_template(["A", "B", "C"], n_rows=6)
+    assert list(tmpl.columns) == ["A", "B", "C"] and len(tmpl) == 6
+
+
+def test_customize_figure_edits_apply():
+    df = nc.load_table(SAMPLE)
+    order = ["eYFP", "ChR2", "ChR2+Antagonist"]
+    res = nc.run_group_comparison(df, "group", "open_arm_time_pct", order=order)
+    fig = nc.make_group_figure(df, "group", "open_arm_time_pct", order=order, stat=res)
+    nc.customize_figure(fig, title="Edited", title_loc="center", ylabel="Y label",
+                        xtick_labels=["a", "b", "c"])
+    ax = fig.axes[0]
+    assert ax.get_title(loc="center") == "Edited"
+    assert ax.get_ylabel() == "Y label"
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["a", "b", "c"]
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):
