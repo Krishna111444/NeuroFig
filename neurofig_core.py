@@ -556,6 +556,100 @@ def make_paired_figure(before: np.ndarray, after: np.ndarray,
     return fig
 
 
+# ---------------------------------------------------------------- time-course / ΔF/F
+def timecourse_from_wide(df: pd.DataFrame, time_col: str,
+                         trace_cols: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Wide time-course table -> (time vector, traces matrix of shape n_subjects×n_time).
+
+    The near-universal export shape from calcium/photometry pipelines is one row
+    per time point and one column per subject/trial. We transpose to subjects×time
+    so every downstream op (mean, SEM, AUC) is 'across subjects at each time'.
+    """
+    t = np.asarray(df[time_col], dtype=float)
+    m = np.asarray(df[trace_cols], dtype=float).T
+    return t, m
+
+
+def timecourse_stats(traces: np.ndarray, error: str = "sem") -> tuple[np.ndarray, np.ndarray]:
+    """Across-subject mean and error band at each time point (NaN-aware).
+
+    error='sem' (default) or 'sd'. Uses ddof=1 (sample) and, for SEM, divides by
+    sqrt of the *non-NaN* count per column so ragged traces stay correct.
+    """
+    traces = np.asarray(traces, dtype=float)
+    mean = np.nanmean(traces, axis=0)
+    sd = np.nanstd(traces, axis=0, ddof=1)
+    if error == "sd":
+        return mean, sd
+    n = np.sum(~np.isnan(traces), axis=0)
+    return mean, sd / np.sqrt(np.maximum(n, 1))
+
+
+def timecourse_auc(time: np.ndarray, traces: np.ndarray,
+                   window: tuple[float, float]) -> np.ndarray:
+    """Trapezoidal area under each subject's trace within [t0, t1].
+
+    This is the honest way to bring statistics to a time-course: reduce each
+    subject to one number in a pre-registered window, then run a standard test
+    (run_group_comparison / run_paired_comparison) on those AUCs. Avoids the
+    invalid 'test every time-bin' approach.
+    """
+    time = np.asarray(time, dtype=float)
+    traces = np.asarray(traces, dtype=float)
+    t0, t1 = window
+    mask = (time >= t0) & (time <= t1)
+    if mask.sum() < 2:
+        raise ValueError("AUC window must cover at least 2 time points.")
+    integ = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # renamed in NumPy 2.0
+    return integ(traces[:, mask], time[mask], axis=1)
+
+
+def make_timecourse_figure(time: np.ndarray,
+                           traces_by_condition: dict,
+                           ylabel: str = "ΔF/F (%)", xlabel: str = "Time (s)",
+                           error: str = "sem",
+                           event_window=None, event_label: str | None = None,
+                           title: str = "") -> plt.Figure:
+    """Mean±SEM (or SD) trace with shaded band; one line per condition.
+
+    traces_by_condition : {label -> array (n_subjects × n_time)}.
+    event_window        : a float draws a dashed line at that time (stimulus onset);
+                          a (t0, t1) tuple shades the stimulus epoch.
+    A baseline at ΔF/F = 0 is drawn because ΔF/F is defined relative to baseline.
+    """
+    apply_style()
+    time = np.asarray(time, dtype=float)
+    fig, ax = plt.subplots(figsize=(4.2, 2.8))
+
+    ax.axhline(0, color="0.7", lw=0.6, zorder=1)
+    if event_window is not None:
+        if isinstance(event_window, (int, float)):
+            ax.axvline(float(event_window), color="0.4", lw=0.8, ls="--", zorder=1)
+        else:
+            ax.axvspan(float(event_window[0]), float(event_window[1]),
+                       color="0.85", zorder=0, label=event_label)
+
+    for i, (label, traces) in enumerate(traces_by_condition.items()):
+        mean, err = timecourse_stats(traces, error=error)
+        c = OKABE_ITO[i % len(OKABE_ITO)]
+        ax.fill_between(time, mean - err, mean + err, color=c, alpha=0.25,
+                        linewidth=0, zorder=2)
+        ax.plot(time, mean, color=c, lw=1.3, zorder=3, label=label)
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(float(time.min()), float(time.max()))
+    if title:
+        ax.set_title(title, loc="left", fontweight="bold")
+    if len(traces_by_condition) > 1 or event_label:
+        ax.legend(frameon=False, fontsize=6.5, loc="best")
+
+    fig.text(0.5, -0.04, f"line = mean; shading = ±{error.upper()} across subjects",
+             ha="center", va="top", fontsize=6.2, color="0.25")
+    fig.tight_layout()
+    return fig
+
+
 def figure_to_bytes(fig: plt.Figure, fmt: str = "png") -> bytes:
     buf = io.BytesIO()
     fig.savefig(buf, format=fmt, bbox_inches="tight", facecolor="white")

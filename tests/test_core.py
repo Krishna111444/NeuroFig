@@ -146,6 +146,47 @@ def test_box_and_violin_export():
         assert len(nc.figure_to_bytes(fig, "svg")) > 1000
 
 
+def test_timecourse_auc_exact():
+    import numpy as np
+    # flat trace of height 2 over a width-4 window -> area exactly 8
+    t = np.linspace(0, 4, 50)
+    flat = np.full((1, 50), 2.0)
+    auc = nc.timecourse_auc(t, flat, (0, 4))
+    assert abs(float(auc[0]) - 8.0) < 1e-9
+    # too-narrow window is rejected, not silently wrong
+    try:
+        nc.timecourse_auc(t, flat, (0, 0))
+        assert False, "expected ValueError for degenerate window"
+    except ValueError:
+        pass
+
+
+def test_timecourse_stats_and_figure():
+    import numpy as np
+    rng = np.random.default_rng(5)
+    t = np.linspace(-1, 3, 80)
+    A = rng.normal(0, 0.2, (12, t.size)) + (2.0 * (t >= 0))
+    B = rng.normal(0, 0.2, (12, t.size)) + (0.5 * (t >= 0))
+    mean, sem = nc.timecourse_stats(A, error="sem")
+    assert mean.shape == t.shape and sem.shape == t.shape
+    assert np.all(sem >= 0)
+    # SEM must be smaller than SD for n>1
+    _, sd = nc.timecourse_stats(A, error="sd")
+    assert np.nanmean(sem) < np.nanmean(sd)
+    fig = nc.make_timecourse_figure(t, {"A": A, "B": B}, event_window=(0, 1),
+                                    event_label="stim")
+    assert len(nc.figure_to_bytes(fig, "pdf")) > 1000
+
+
+def test_timecourse_from_wide_shape():
+    import numpy as np
+    import pandas as pd
+    df = pd.DataFrame({"t": [0.0, 1.0, 2.0], "s1": [1, 2, 3], "s2": [4, 5, 6]})
+    t, m = nc.timecourse_from_wide(df, "t", ["s1", "s2"])
+    assert t.tolist() == [0.0, 1.0, 2.0]
+    assert m.shape == (2, 3)  # 2 subjects x 3 timepoints
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):
