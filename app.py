@@ -53,16 +53,36 @@ order = st.multiselect("Group order (drag to reorder / deselect to drop)", optio
 ylabel = st.text_input("Y-axis label", value=value_col.replace("_", " "))
 title = st.text_input("Panel title (optional)", value="")
 
+o1, o2 = st.columns(2)
+plot_type = o1.selectbox("Plot type", ["Grouped bar (mean±SEM)", "Box plot", "Violin plot"])
+test_choice = o2.selectbox(
+    "Statistical test",
+    ["Automatic (recommended)", "Force parametric (t-test / ANOVA)",
+     "Force non-parametric (rank-based)"],
+    help="Automatic picks parametric vs non-parametric from a normality check, "
+         "and always tells you which test it used.")
+_method = {"Automatic (recommended)": "auto",
+           "Force parametric (t-test / ANOVA)": "parametric",
+           "Force non-parametric (rank-based)": "nonparametric"}[test_choice]
+
 # ---- 3. run + render -------------------------------------------------------
 if st.button("Generate figure", type="primary") and order:
-    stat = nc.run_group_comparison(df, group_col, value_col, order=order)
+    stat = nc.run_group_comparison(df, group_col, value_col, order=order, method=_method)
     for w in stat.warnings:
         st.warning(w)
-    fig = nc.make_group_figure(df, group_col, value_col, order=order,
-                               stat=stat, ylabel=ylabel, title=title)
+    if plot_type == "Box plot":
+        fig = nc.make_box_figure(df, group_col, value_col, order=order, kind="box",
+                                 stat=stat, ylabel=ylabel, title=title)
+    elif plot_type == "Violin plot":
+        fig = nc.make_box_figure(df, group_col, value_col, order=order, kind="violin",
+                                 stat=stat, ylabel=ylabel, title=title)
+    else:
+        fig = nc.make_group_figure(df, group_col, value_col, order=order,
+                                   stat=stat, ylabel=ylabel, title=title)
     st.pyplot(fig, use_container_width=False)
 
-    st.success(f"Statistic used: {stat.summary}")
+    _posthoc = f" · post-hoc: {stat.posthoc_name}" if stat.posthoc_name and len(order) > 2 else ""
+    st.success(f"Test used: {stat.test_name} ({stat.method}){_posthoc}  —  {stat.summary}")
     if stat.pairwise:
         st.write("**Pairwise comparisons**")
         st.table([{"Group 1": p["g1"], "Group 2": p["g2"],

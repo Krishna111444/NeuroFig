@@ -57,6 +57,95 @@ def test_figure_exports_all_formats():
         assert len(b) > 1000, f"{fmt} export looks empty"
 
 
+def test_clean_columns_handles_mess():
+    import pandas as pd
+    df = pd.DataFrame([[1, 2, 3]], columns=[" Group ", "Value\n(mV)", "Unnamed: 2"])
+    out = nc.clean_columns(df)
+    assert list(out.columns) == ["Group", "Value (mV)", "column_3"]
+    # duplicate names get de-duplicated, not silently merged
+    df2 = pd.DataFrame([[1, 2]], columns=["x", "x"])
+    assert list(nc.clean_columns(df2).columns) == ["x", "x_1"]
+
+
+def test_wide_to_long_roundtrip():
+    import pandas as pd
+    wide = pd.DataFrame({"A": [1.0, 2.0, 3.0], "B": [4.0, 5.0, None]})
+    long = nc.wide_to_long(wide, ["A", "B"], group_name="grp", value_name="val")
+    assert set(long["grp"]) == {"A", "B"}
+    assert len(long) == 5  # the NaN was dropped
+    assert "val" in long.columns
+
+
+def test_nonparametric_forced_two_and_three_groups():
+    df = nc.load_table(SAMPLE)
+    # 3 groups forced non-parametric -> Kruskal-Wallis + Dunn
+    res = nc.run_group_comparison(df, "group", "open_arm_time_pct",
+                                  order=["eYFP", "ChR2", "ChR2+Antagonist"],
+                                  method="nonparametric")
+    assert res.test_name == "Kruskal-Wallis"
+    assert res.method == "nonparametric"
+    assert res.pairwise and all("p_text" in pr and pr["p_text"] != "0" for pr in res.pairwise)
+    # clearly separated groups (eYFP ~17 vs ChR2 ~34) must come out significant
+    sig = {(pr["g1"], pr["g2"]): pr["stars"] for pr in res.pairwise}
+    key = ("ChR2", "eYFP") if ("ChR2", "eYFP") in sig else ("eYFP", "ChR2")
+    assert sig[key] != "ns"
+
+    # 2 groups forced non-parametric -> Mann-Whitney
+    df2 = df[df["group"].isin(["eYFP", "ChR2"])]
+    res2 = nc.run_group_comparison(df2, "group", "open_arm_time_pct",
+                                   order=["eYFP", "ChR2"], method="nonparametric")
+    assert res2.test_name == "Mann-Whitney U"
+
+
+def test_auto_uses_parametric_on_normal_data():
+    df = nc.load_table(SAMPLE)
+    res = nc.run_group_comparison(df, "group", "open_arm_time_pct",
+                                  order=["eYFP", "ChR2", "ChR2+Antagonist"], method="auto")
+    # the sample is drawn from normals -> auto should stay parametric
+    assert res.method == "parametric"
+    assert res.test_name == "One-way ANOVA"
+
+
+def test_dunn_matches_kruskal_direction():
+    # Construct 3 well-separated groups: KW must be significant AND every
+    # extreme pair (low vs high) must be significant under Dunn.
+    import numpy as np
+    import pandas as pd
+    rng = np.random.default_rng(0)
+    rows = []
+    for g, mu in [("low", 0), ("mid", 10), ("high", 20)]:
+        for v in rng.normal(mu, 1.0, 15):
+            rows.append({"g": g, "y": float(v)})
+    df = pd.DataFrame(rows)
+    res = nc.run_group_comparison(df, "g", "y",
+                                  order=["low", "mid", "high"], method="nonparametric")
+    assert res.omnibus_p < 0.05
+    sig = {frozenset((pr["g1"], pr["g2"])): pr["stars"] for pr in res.pairwise}
+    assert sig[frozenset(("low", "high"))] != "ns"
+
+
+def test_paired_comparison_and_figure():
+    import numpy as np
+    before = np.array([10.0, 12.0, 9.0, 11.0, 13.0, 10.5, 12.5, 9.5])
+    after = before + np.array([2.0, 1.5, 2.5, 1.8, 2.2, 1.9, 2.1, 2.3])  # consistent rise
+    res = nc.run_paired_comparison(before, after, method="auto")
+    assert res.test_name in ("Paired t-test", "Wilcoxon signed-rank")
+    assert res.pairwise[0]["stars"] != "ns"  # consistent within-subject change
+    fig = nc.make_paired_figure(before, after, stat=res, ylabel="signal")
+    assert len(nc.figure_to_bytes(fig, "pdf")) > 1000
+
+
+def test_box_and_violin_export():
+    df = nc.load_table(SAMPLE)
+    order = ["eYFP", "ChR2", "ChR2+Antagonist"]
+    res = nc.run_group_comparison(df, "group", "open_arm_time_pct",
+                                  order=order, method="nonparametric")
+    for kind in ("box", "violin"):
+        fig = nc.make_box_figure(df, "group", "open_arm_time_pct", order=order,
+                                 kind=kind, stat=res, ylabel="Open-arm time (%)")
+        assert len(nc.figure_to_bytes(fig, "svg")) > 1000
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):
