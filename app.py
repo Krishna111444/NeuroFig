@@ -433,16 +433,79 @@ with tab_gallery:
     gpreset = g2.selectbox("Journal style", list(nc.JOURNAL_PRESETS.keys()), key="gal_preset")
     gcols = g3.selectbox("Column width", ["single", "double"], key="gal_cols")
     gwidth = nc.journal_width_mm(gpreset, gcols)
-    gtitle = st.text_input("Title (optional)", "", key="gal_title")
 
-    fig = jf.FIGURES[choice](preset=gpreset, width_mm=gwidth)
-    if gtitle:
+    if choice in jf.REAL_DATA_FIGURES:
+        kind = jf.REAL_DATA_FIGURES[choice]
+        sample = {"volcano": jf.sample_volcano_df, "raincloud": jf.sample_raincloud_df,
+                  "correlation": jf.sample_correlation_df}[kind]()
+        st.info("This figure accepts your own data. Download the template to see the "
+                "expected format, or upload a matching file.")
+        st.download_button("⬇ Sample template (CSV)", sample.to_csv(index=False),
+                           f"{kind}_template.csv", "text/csv")
+        src = st.radio("Data", ["Use sample", "Upload your data"], horizontal=True, key="gal_src")
+        df = sample
+        if src == "Upload your data":
+            up = st.file_uploader("CSV/Excel", type=["csv", "xlsx", "xls"], key="gal_up")
+            df = nc.load_table(up) if up is not None else None
+        if df is None:
+            st.stop()
+        st.dataframe(df.head(10), use_container_width=True)
+        cols = list(df.columns)
+        gtitle = st.text_input("Title (optional)", "", key="gal_title")
+
+        fig, warns = None, []
         try:
-            nc.customize_figure(fig, title=gtitle)
-        except Exception:
-            pass
-    st.pyplot(fig, use_container_width=False)
-    render_downloads(fig, gwidth, gpreset, gcols)
+            if kind == "volcano":
+                c1, c2, c3 = st.columns(3)
+                fc_col = c1.selectbox("Fold-change column", cols)
+                p_col = c2.selectbox("p-value column", [c for c in cols if c != fc_col])
+                label_col = c3.selectbox("Label column (optional)", ["(none)"] + cols)
+                o1, o2, o3, o4 = st.columns(4)
+                fc_is_log2 = o1.selectbox("Fold change is", ["already log2", "linear"]) == "already log2"
+                p_is_nlp = o2.selectbox("p-value is", ["raw p", "already -log10"]) == "already -log10"
+                fc_thresh = o3.number_input("FC threshold", value=1.0, min_value=0.0)
+                p_thresh = o4.number_input("p threshold", value=0.05, min_value=0.0, format="%.4f")
+                fig, warns = jf.volcano_from_data(
+                    df, fc_col, p_col, fc_is_log2=fc_is_log2, p_is_neglog10=p_is_nlp,
+                    fc_thresh=fc_thresh, p_thresh=p_thresh,
+                    label_col=None if label_col == "(none)" else label_col,
+                    preset=gpreset, width_mm=gwidth)
+            elif kind == "raincloud":
+                c1, c2 = st.columns(2)
+                group_col = c1.selectbox("Group column", cols)
+                value_col = c2.selectbox("Value column", [c for c in cols if c != group_col])
+                fig, warns = jf.raincloud_from_data(df, group_col, value_col,
+                                                    preset=gpreset, width_mm=gwidth)
+            else:  # correlation
+                value_cols = st.multiselect("Numeric columns to correlate", cols, default=cols)
+                method = st.selectbox("Method", ["pearson", "spearman", "kendall"])
+                if len(value_cols) < 2:
+                    st.warning("Select at least two columns."); st.stop()
+                fig, warns = jf.correlation_heatmap_from_data(df, value_cols, method=method,
+                                                              preset=gpreset, width_mm=gwidth)
+        except (ValueError, RuntimeError) as e:
+            st.error(str(e)); st.stop()
+        for m in warns:
+            st.warning(m)
+        if gtitle:
+            try:
+                nc.customize_figure(fig, title=gtitle)
+            except Exception:
+                pass
+        st.pyplot(fig, use_container_width=False)
+        render_downloads(fig, gwidth, gpreset, gcols)
+    else:
+        gtitle = st.text_input("Title (optional)", "", key="gal_title")
+        fig = jf.FIGURES[choice](preset=gpreset, width_mm=gwidth)
+        if gtitle:
+            try:
+                nc.customize_figure(fig, title=gtitle)
+            except Exception:
+                pass
+        st.caption("Shown with sample data. Volcano, raincloud, and correlation heatmap "
+                   "also accept your own uploads.")
+        st.pyplot(fig, use_container_width=False)
+        render_downloads(fig, gwidth, gpreset, gcols)
 
 
 # ============================================================ PDB → PDBQT

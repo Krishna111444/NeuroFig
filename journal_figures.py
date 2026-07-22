@@ -12,6 +12,7 @@ so adding a figure is cheap — the platform is the moat, not any single plot.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge, Rectangle
 from matplotlib.path import Path
@@ -569,4 +570,220 @@ FIGURES = {
     "18 Treemap": treemap,
     "19 Mosaic + sunburst": mosaic_sunburst,
     "20 Split violin": split_violin,
+}
+
+
+# ============================================================================
+# REAL-DATA VERSIONS (upload-driven), hardened by inversion: for each figure we
+# enumerated how it could break or mislead, and guard every case. Each returns
+# (figure, warnings) so the UI can surface what was cleaned or dropped.
+# ============================================================================
+
+def _coerce(df, cols):
+    out = df[cols].copy()
+    for c in cols:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    return out
+
+
+# ---------------------------------------------------------------- volcano (real)
+def volcano_from_data(df, fc_col, p_col, *, fc_is_log2=True, p_is_neglog10=False,
+                      fc_thresh=1.0, p_thresh=0.05, label_col=None, top_n=8,
+                      preset=None, width_mm=None):
+    """Volcano from a differential-expression table.
+
+    Inversion guards:
+      • p = 0            -> floored to the smallest non-zero p (else -log10 = ∞)
+      • p outside [0,1]  -> dropped (invalid probabilities)
+      • linear FC ≤ 0    -> dropped (log2 undefined)
+      • NaN/non-numeric  -> dropped
+      • already -log10 p -> p_is_neglog10 avoids a double transform
+    """
+    warnings = []
+    keep_cols = [fc_col, p_col] + ([label_col] if label_col else [])
+    d = _coerce(df, [fc_col, p_col]).assign(
+        **({label_col: df[label_col]} if label_col else {}))
+    n0 = len(d)
+    d = d.dropna(subset=[fc_col, p_col])
+    if len(d) < n0:
+        warnings.append(f"Dropped {n0 - len(d)} rows with missing/non-numeric values.")
+
+    fc = d[fc_col].to_numpy(float)
+    if not fc_is_log2:
+        bad = fc <= 0
+        if bad.any():
+            warnings.append(f"Dropped {int(bad.sum())} rows with non-positive linear "
+                            f"fold-change (log2 undefined).")
+            d = d[~bad]; fc = d[fc_col].to_numpy(float)
+        fc = np.log2(fc)
+
+    praw = d[p_col].to_numpy(float)
+    if p_is_neglog10:
+        neglogp = praw
+    else:
+        bad = (praw < 0) | (praw > 1)
+        if bad.any():
+            warnings.append(f"Dropped {int(bad.sum())} p-values outside [0, 1].")
+            d = d[~bad]; fc = fc[~bad]; praw = praw[~bad]
+        nz = praw[praw > 0]
+        floor = nz.min() if nz.size else 1e-300
+        nzero = int((praw == 0).sum())
+        if nzero:
+            warnings.append(f"{nzero} p-values equal 0 were floored to the smallest "
+                            f"non-zero p ({floor:.1e}) to avoid infinite -log10.")
+        praw = np.where(praw == 0, floor, praw)
+        neglogp = -np.log10(praw)
+
+    if len(fc) == 0:
+        raise ValueError("No valid rows remain after cleaning — check the columns chosen.")
+
+    p_line = p_thresh if p_is_neglog10 else -np.log10(p_thresh)
+    up = (fc > fc_thresh) & (neglogp > p_line)
+    dn = (fc < -fc_thresh) & (neglogp > p_line)
+    ns = ~(up | dn)
+
+    fig, ax = _new(preset, width_mm, 3.6, 3.4)
+    ax.scatter(fc[ns], neglogp[ns], s=5, color="0.7", alpha=0.5, linewidth=0)
+    ax.scatter(fc[up], neglogp[up], s=8, color=OKABE_ITO[1], linewidth=0, label="Up")
+    ax.scatter(fc[dn], neglogp[dn], s=8, color=OKABE_ITO[0], linewidth=0, label="Down")
+    ax.axhline(p_line, color="0.4", ls="--", lw=0.7)
+    ax.axvline(fc_thresh, color="0.4", ls="--", lw=0.7)
+    ax.axvline(-fc_thresh, color="0.4", ls="--", lw=0.7)
+    if label_col and top_n:
+        score = neglogp * (up | dn)
+        idx = np.argsort(score)[-int(top_n):]
+        labs = d[label_col].to_numpy()
+        for k in idx:
+            if up[k] or dn[k]:
+                ax.annotate(str(labs[k]), (fc[k], neglogp[k]), fontsize=5,
+                            xytext=(2, 2), textcoords="offset points")
+    ax.set_xlabel("log2 fold change"); ax.set_ylabel("-log10 p")
+    ax.legend(frameon=False, fontsize=6.5, loc="upper right")
+    fig.tight_layout()
+    return fig, warnings
+
+
+# ---------------------------------------------------------------- raincloud (real)
+def raincloud_from_data(df, group_col, value_col, order=None,
+                        preset=None, width_mm=None):
+    """Raincloud from long data (group column + numeric value column).
+
+    Inversion guards:
+      • group with n < 2 or zero spread -> KDE is singular; fall back to points
+        (and box when n ≥ 2) instead of crashing
+      • non-numeric values -> coerced then dropped
+      • empty / single group still renders what it can
+    """
+    warnings = []
+    d = df[[group_col, value_col]].copy()
+    d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
+    n0 = len(d); d = d.dropna()
+    if len(d) < n0:
+        warnings.append(f"Dropped {n0 - len(d)} rows with missing/non-numeric values.")
+    levels = order or list(dict.fromkeys(d[group_col].tolist()))
+    levels = [g for g in levels if (d[group_col] == g).sum() > 0]
+    if not levels:
+        raise ValueError("No groups with data to plot.")
+
+    fig, ax = _new(preset, width_mm, max(3.0, 0.9 * len(levels) + 1.5), 3.0)
+    for i, g in enumerate(levels):
+        vals = d.loc[d[group_col] == g, value_col].to_numpy(float)
+        c = OKABE_ITO[i % len(OKABE_ITO)]
+        can_kde = len(vals) >= 2 and np.std(vals) > 1e-9
+        if can_kde:
+            try:
+                _half_violin(ax, vals, i + 0.05, c, side=1)
+                ax.boxplot(vals, positions=[i - 0.12], widths=0.12, patch_artist=True,
+                           showfliers=False, medianprops=dict(color="black"),
+                           boxprops=dict(facecolor=c, alpha=0.4, edgecolor=c))
+            except Exception:
+                can_kde = False
+        if not can_kde:
+            warnings.append(f"Group '{g}' (n={len(vals)}) has too little spread for a "
+                            f"density/box — showing points only.")
+        rng = np.random.default_rng(i)
+        jit = i - 0.28 + (rng.random(len(vals)) - 0.5) * 0.12
+        ax.scatter(jit, vals, s=8, color=c, alpha=0.6, linewidth=0)
+    ax.set_xticks(range(len(levels))); ax.set_xticklabels(levels)
+    ax.set_ylabel(value_col.replace("_", " "))
+    fig.tight_layout()
+    return fig, warnings
+
+
+# ---------------------------------------------------------------- correlation (real)
+def correlation_heatmap_from_data(df, value_cols, method="pearson", annotate=True,
+                                  preset=None, width_mm=None):
+    """Correlation heatmap from selected numeric columns.
+
+    Inversion guards:
+      • constant column -> correlation is undefined (NaN); dropped with a warning
+      • < 2 usable columns -> clear error
+      • missing values -> pandas pairwise-complete correlation (no silent NaN wipe)
+      • too few complete rows -> warned (estimates unstable)
+      • method: pearson (linear) / spearman (monotonic) / kendall
+    """
+    warnings = []
+    if method not in ("pearson", "spearman", "kendall"):
+        raise ValueError("method must be pearson, spearman, or kendall.")
+    d = _coerce(df, value_cols)
+    const = [c for c in value_cols if d[c].nunique(dropna=True) <= 1]
+    if const:
+        warnings.append(f"Dropped constant column(s) with no variance: {', '.join(map(str, const))}.")
+        d = d.drop(columns=const)
+    if d.shape[1] < 2:
+        raise ValueError("Need at least 2 non-constant numeric columns to correlate.")
+    if len(d.dropna()) < 3:
+        warnings.append("Fewer than 3 complete rows — correlations may be unstable.")
+
+    C = d.corr(method=method)
+    k = C.shape[0]
+    fig, ax = _new(preset, width_mm, max(3.0, 0.4 * k + 1.5), max(2.8, 0.4 * k + 1.3))
+    im = ax.imshow(C.to_numpy(), cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
+    ax.set_xticks(range(k)); ax.set_yticks(range(k))
+    ax.set_xticklabels(C.columns, rotation=90, fontsize=5)
+    ax.set_yticklabels(C.columns, fontsize=5)
+    if annotate and k <= 12:
+        for i in range(k):
+            for j in range(k):
+                v = C.iat[i, j]
+                if v == v:
+                    ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=4.5,
+                            color="white" if abs(v) > 0.6 else "black")
+    fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02, label=f"{method.title()} r")
+    fig.tight_layout()
+    return fig, warnings
+
+
+# ---------------------------------------------------------------- sample templates
+def sample_volcano_df():
+    rng = np.random.default_rng(3)
+    n = 800
+    lfc = rng.normal(0, 1.2, n)
+    p = 10 ** (-np.abs(rng.normal(0, 1.5, n)) - 0.1 * lfc ** 2)
+    p[rng.integers(0, n, 5)] = 0.0  # realistic: some tools report p = 0
+    return pd.DataFrame({"gene": [f"G{i}" for i in range(n)],
+                         "log2FoldChange": np.round(lfc, 3),
+                         "pvalue": p})
+
+
+def sample_raincloud_df():
+    rng = np.random.default_rng(6)
+    rows = []
+    for g, m in [("A", 0), ("B", 1.2), ("C", 2.4)]:
+        for _ in range(60):
+            rows.append({"group": g, "value": round(float(rng.normal(m, 1.0)), 3)})
+    return pd.DataFrame(rows)
+
+
+def sample_correlation_df():
+    rng = np.random.default_rng(15)
+    x = rng.normal(0, 1, (200, 6))
+    x[:, 1] += x[:, 0]; x[:, 3] -= x[:, 2]
+    return pd.DataFrame(np.round(x, 3), columns=[f"var{i}" for i in range(6)])
+
+
+REAL_DATA_FIGURES = {
+    "03 Volcano": "volcano",
+    "06 Raincloud": "raincloud",
+    "15 Correlation heatmap": "correlation",
 }
