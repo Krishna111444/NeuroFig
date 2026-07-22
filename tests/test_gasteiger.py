@@ -68,6 +68,42 @@ def test_matches_openbabel_on_nonresonant():
     assert max(abs(mine[i] - obq[i]) for i in range(len(atoms))) < 0.005
 
 
+def _mol2_from_smiles(smi):
+    import pdbqt_tools as pt
+    import subprocess
+    import tempfile
+    exe = pt.find_obabel()
+    with tempfile.TemporaryDirectory() as d:
+        m = os.path.join(d, "m.mol2")
+        subprocess.run([exe, "-:" + smi, "-O", m, "--gen3d", "-h", "--partialcharge", "gasteiger"],
+                       capture_output=True, text=True)
+        atoms, bonds, orders, obq, sec = [], [], [], [], None
+        for line in open(m):
+            if line.startswith("@<TRIPOS>"):
+                sec = line.strip(); continue
+            if sec == "@<TRIPOS>ATOM" and line.strip():
+                f = line.split(); atoms.append(f[5]); obq.append(float(f[8]))
+            elif sec == "@<TRIPOS>BOND" and line.strip():
+                f = line.split(); bonds.append((int(f[1]) - 1, int(f[2]) - 1)); orders.append(f[3])
+    return atoms, bonds, orders, obq
+
+
+def test_resonance_matches_openbabel_on_carboxyls():
+    # Carboxylic acids / esters: resonance handling must reproduce OB exactly,
+    # where a plain PEOE pass is off by ~0.15 e at the -OH oxygen.
+    import pdbqt_tools as pt
+    if not pt.obabel_available():
+        return
+    for smi in ("CC(=O)O", "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "CC(=O)OC"):  # acetic, ibuprofen, ester
+        atoms, bonds, orders, obq = _mol2_from_smiles(smi)
+        keys = [g.sybyl_to_key(a) for a in atoms]
+        mine = g.compute_charges(keys, bonds, bond_orders=orders)
+        assert max(abs(mine[i] - obq[i]) for i in range(len(atoms))) < 0.005, smi
+        # and without resonance it is clearly worse — proving the fix matters
+        plain = g.compute_charges(keys, bonds, resonance=False)
+        assert max(abs(plain[i] - obq[i]) for i in range(len(atoms))) > 0.1, smi
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):

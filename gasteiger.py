@@ -67,13 +67,50 @@ def sybyl_to_key(sybyl: str) -> str:
     raise KeyError(f"no Gasteiger parameters for atom type {sybyl!r}")
 
 
+def _element(key: str) -> str:
+    return key.split(".")[0]
+
+
+def resonance_retype(param_keys: list[str], bonds: list[tuple[int, int]],
+                     bond_orders: list) -> list[str]:
+    """Give conjugated heteroatoms sp2 character before charge equalisation.
+
+    In a carboxyl/ester/amide, the single-bonded O or N is not really sp3 — its
+    lone pair delocalises into the adjacent C=O (resonance), so it behaves as sp2.
+    A plain PEOE pass misses this and under-charges the atom by ~0.15 e; retyping
+    such atoms to sp2 reproduces Open Babel exactly. Rule: an sp3 O/N joined by a
+    single bond to a carbon that also has a double bond to O/N becomes sp2.
+    """
+    keys = list(param_keys)
+    carbonyl_c = set()
+    for (a, b), t in zip(bonds, bond_orders):
+        if str(t) == "2":
+            for x, y in ((a, b), (b, a)):
+                if _element(keys[x]) == "C" and _element(keys[y]) in ("O", "N"):
+                    carbonyl_c.add(x)
+    for (a, b), t in zip(bonds, bond_orders):
+        if str(t) == "1":
+            for x, y in ((a, b), (b, a)):
+                if keys[x] == "O.3" and y in carbonyl_c:
+                    keys[x] = "O.2"
+                elif keys[x] == "N.3" and y in carbonyl_c:
+                    keys[x] = "N.2"
+    return keys
+
+
 def compute_charges(param_keys: list[str], bonds: list[tuple[int, int]],
+                    bond_orders: list | None = None, resonance: bool = True,
                     n_iter: int = 6) -> list[float]:
     """PEOE charges for atoms described by `param_keys` and a `bonds` edge list.
 
-    param_keys : parameter key per atom (e.g. 'C.3', 'H', 'O.2'), same order as atoms.
-    bonds      : (i, j) index pairs (0-based) — bond order is not used by PEOE.
+    param_keys  : parameter key per atom (e.g. 'C.3', 'H', 'O.2'), same order as atoms.
+    bonds       : (i, j) index pairs (0-based).
+    bond_orders : optional per-bond order ('1'/'2'/'ar'/2 …). When given (and
+                  resonance=True), conjugated O/N are retyped to sp2 first — needed
+                  for correct carboxyl/ester/amide charges. PEOE itself ignores order.
     """
+    if bond_orders is not None and resonance:
+        param_keys = resonance_retype(param_keys, bonds, bond_orders)
     n = len(param_keys)
     q = [0.0] * n
     p = [PARAMS[k] for k in param_keys]
