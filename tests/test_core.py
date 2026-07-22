@@ -178,6 +178,15 @@ def test_timecourse_stats_and_figure():
     assert len(nc.figure_to_bytes(fig, "pdf")) > 1000
 
 
+def test_timecourse_sig_windows_render():
+    import numpy as np
+    t = np.linspace(-1, 3, 60)
+    A = np.random.default_rng(0).normal(0, 0.2, (8, 60)) + 2 * (t >= 0)
+    fig = nc.make_timecourse_figure(t, {"A": A}, sig_windows=[(0.0, 1.5)],
+                                    event_window=(0, 1))
+    assert len(nc.figure_to_bytes(fig, "pdf")) > 1000
+
+
 def test_timecourse_from_wide_shape():
     import numpy as np
     import pandas as pd

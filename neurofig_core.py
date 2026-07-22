@@ -694,13 +694,15 @@ def make_timecourse_figure(time: np.ndarray,
                            ylabel: str = "ΔF/F (%)", xlabel: str = "Time (s)",
                            error: str = "sem",
                            event_window=None, event_label: str | None = None,
-                           title: str = "",
+                           title: str = "", sig_windows: list | None = None,
                            preset: str | None = None, width_mm: float | None = None) -> plt.Figure:
     """Mean±SEM (or SD) trace with shaded band; one line per condition.
 
     traces_by_condition : {label -> array (n_subjects × n_time)}.
     event_window        : a float draws a dashed line at that time (stimulus onset);
                           a (t0, t1) tuple shades the stimulus epoch.
+    sig_windows         : list of (t_start, t_end) spans (e.g. from a cluster test)
+                          drawn as a black bar under the traces marking significance.
     A baseline at ΔF/F = 0 is drawn because ΔF/F is defined relative to baseline.
     """
     apply_preset(preset) if preset else apply_style()
@@ -732,8 +734,16 @@ def make_timecourse_figure(time: np.ndarray,
     if len(traces_by_condition) > 1 or event_label:
         ax.legend(frameon=False, fontsize=6.5, loc="best")
 
-    fig.text(0.5, -0.04, f"line = mean; shading = ±{error.upper()} across subjects",
-             ha="center", va="top", fontsize=6.2, color="0.25")
+    caption = f"line = mean; shading = ±{error.upper()} across subjects"
+    if sig_windows:
+        ylo = ax.get_ylim()[0]
+        ybar = ylo + 0.02 * (ax.get_ylim()[1] - ylo)
+        for (ts, te) in sig_windows:
+            ax.plot([ts, te], [ybar, ybar], color="black", lw=3,
+                    solid_capstyle="butt", zorder=5)
+        caption += "; black bar = p<0.05 (cluster-based permutation test)"
+
+    fig.text(0.5, -0.04, caption, ha="center", va="top", fontsize=6.2, color="0.25")
     fig.tight_layout()
     return fig
 
