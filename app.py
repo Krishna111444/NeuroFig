@@ -18,6 +18,7 @@ import streamlit as st
 
 import cluster_stats as cs
 import doseresponse as dr
+import journal_figures as jf
 import labcalc as lc
 import licensing
 import neurofig_core as nc
@@ -82,8 +83,8 @@ def render_downloads(fig, width_mm, preset, columns):
             st.link_button("Get clean PDF/SVG — buy a license", _BUY_URL)
 
 
-tab_fig, tab_pdbqt, tab_calc = st.tabs(
-    ["📊 Figures & statistics", "🧬 PDB → PDBQT", "🧮 Calculators"])
+tab_fig, tab_gallery, tab_pdbqt, tab_calc = st.tabs(
+    ["📊 Figures & statistics", "🖼️ Figure gallery", "🧬 PDB → PDBQT", "🧮 Calculators"])
 
 
 # ============================================================ FIGURES & STATS
@@ -419,6 +420,29 @@ with tab_fig:
                                             title=title, preset=preset, width_mm=width_mm)
         st.pyplot(fig, use_container_width=False)
         render_downloads(fig, width_mm, preset, columns)
+
+
+# ============================================================ FIGURE GALLERY
+with tab_gallery:
+    st.subheader("20 journal figure types")
+    st.caption("Recurring figures from top-journal papers, on the same engine "
+               "(colourblind-safe, journal presets, exact-mm vector export). Each is "
+               "shown with sample data — pick one, style it, and download.")
+    g1, g2, g3 = st.columns([2, 1, 1])
+    choice = g1.selectbox("Figure type", list(jf.FIGURES.keys()))
+    gpreset = g2.selectbox("Journal style", list(nc.JOURNAL_PRESETS.keys()), key="gal_preset")
+    gcols = g3.selectbox("Column width", ["single", "double"], key="gal_cols")
+    gwidth = nc.journal_width_mm(gpreset, gcols)
+    gtitle = st.text_input("Title (optional)", "", key="gal_title")
+
+    fig = jf.FIGURES[choice](preset=gpreset, width_mm=gwidth)
+    if gtitle:
+        try:
+            nc.customize_figure(fig, title=gtitle)
+        except Exception:
+            pass
+    st.pyplot(fig, use_container_width=False)
+    render_downloads(fig, gwidth, gpreset, gcols)
 
 
 # ============================================================ PDB → PDBQT
