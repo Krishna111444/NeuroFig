@@ -17,6 +17,7 @@ import pandas as pd
 import streamlit as st
 
 import cluster_stats as cs
+import doseresponse as dr
 import labcalc as lc
 import licensing
 import neurofig_core as nc
@@ -87,7 +88,8 @@ tab_fig, tab_pdbqt, tab_calc = st.tabs(
 # ============================================================ FIGURES & STATS
 with tab_fig:
     analysis = st.radio("Analysis type",
-                        ["Group comparison", "Time-course (ΔF/F)"], horizontal=True)
+                        ["Group comparison", "Time-course (ΔF/F)",
+                         "Dose-response (IC50/EC50)"], horizontal=True)
     j1, j2 = st.columns(2)
     preset = j1.selectbox("Journal style", list(nc.JOURNAL_PRESETS.keys()), key="preset")
     columns = j2.selectbox("Column width", ["single", "double"], key="cols")
@@ -196,7 +198,7 @@ with tab_fig:
         render_downloads(fig, width_mm, preset, columns)
 
     # ----------------------------------------------------- time-course ΔF/F
-    else:
+    elif analysis == "Time-course (ΔF/F)":
         st.subheader("1 · Time-course data (wide: one time column + one column per subject)")
         up = st.file_uploader("CSV/Excel", type=["csv", "xlsx", "xls"], key="tcup")
         use_sample = st.checkbox("Use a sample photometry dataset", value=up is None)
@@ -270,6 +272,69 @@ with tab_fig:
                                         event_window=ev, event_label="Stimulus" if show_event else None,
                                         title=title, sig_windows=sig_windows,
                                         preset=preset, width_mm=width_mm)
+        st.pyplot(fig, use_container_width=False)
+        render_downloads(fig, width_mm, preset, columns)
+
+    # ----------------------------------------------------- dose-response
+    else:
+        st.subheader("1 · Dose-response data (a concentration column and a response column)")
+        mode = st.radio("Provide data by", ["Upload a file", "Type / paste data"],
+                        horizontal=True, key="drmode")
+        ddf = None
+        if mode == "Upload a file":
+            up = st.file_uploader("CSV/Excel", type=["csv", "xlsx", "xls"], key="drup")
+            use_sample = st.checkbox("Use a sample drug-screen dataset", value=up is None, key="drsamp")
+            if up is not None:
+                ddf = nc.load_table(up)
+            elif use_sample:
+                rng = np.random.default_rng(5)
+                conc = np.repeat(np.logspace(-9, -3, 8), 3)
+                resp = 100 / (1 + 10 ** ((np.log10(1e-6) - np.log10(conc)) * 1.0)) \
+                    + rng.normal(0, 3, conc.size)
+                ddf = pd.DataFrame({"concentration_M": conc, "response_pct": np.round(resp, 2)})
+        else:
+            ddf = st.data_editor(pd.DataFrame({"concentration": [None] * 8, "response": [None] * 8}),
+                                 num_rows="dynamic", use_container_width=True, key="drgrid")
+            ddf = ddf.apply(pd.to_numeric, errors="coerce").dropna()
+            ddf = ddf if not ddf.empty else None
+
+        if ddf is None or ddf.empty:
+            st.info("Provide dose-response data to continue."); st.stop()
+        st.dataframe(ddf.head(12), use_container_width=True)
+
+        st.subheader("2 · Fit & style")
+        cols_all = list(ddf.columns)
+        a1, a2 = st.columns(2)
+        conc_col = a1.selectbox("Concentration column", cols_all, index=0)
+        resp_col = a2.selectbox("Response column", [c for c in cols_all if c != conc_col],
+                                index=0)
+        kind_label = st.selectbox("Curve type",
+                                  ["Auto-detect", "Inhibitor (IC50)", "Agonist (EC50)"])
+        kind = {"Auto-detect": "auto", "Inhibitor (IC50)": "ic50",
+                "Agonist (EC50)": "ec50"}[kind_label]
+        xlabel = a1.text_input("X-axis label", conc_col.replace("_", " "), key="drxl")
+        ylabel = a2.text_input("Y-axis label", resp_col.replace("_", " "), key="dryl")
+        title = st.text_input("Title", "", key="drtitle")
+
+        try:
+            fit = dr.fit_dose_response(ddf[conc_col].to_numpy(), ddf[resp_col].to_numpy(), kind=kind)
+        except (ValueError, RuntimeError) as e:
+            st.error(str(e)); st.stop()
+
+        st.subheader("3 · Result")
+        m1, m2, m3 = st.columns(3)
+        ci = fit.ic50_ci
+        m1.metric(fit.label, f"{fit.ic50:.3g}",
+                  help=f"95% CI {ci[0]:.3g}–{ci[1]:.3g}" if ci[0] == ci[0] else None)
+        m2.metric("Hill slope", f"{fit.hill:.2f}")
+        m3.metric("R²", f"{fit.r_squared:.3f}")
+        if fit.r_squared < 0.9:
+            st.warning("Low R² — the 4-parameter logistic may not fit this data well. "
+                       "Check for a full sigmoid (clear top and bottom plateaus).")
+
+        fig = dr.make_dose_response_figure(ddf[conc_col].to_numpy(), ddf[resp_col].to_numpy(),
+                                           fit, ylabel=ylabel, xlabel=xlabel, title=title,
+                                           preset=preset, width_mm=width_mm)
         st.pyplot(fig, use_container_width=False)
         render_downloads(fig, width_mm, preset, columns)
 
