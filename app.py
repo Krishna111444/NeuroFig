@@ -22,6 +22,7 @@ import labcalc as lc
 import licensing
 import neurofig_core as nc
 import pdbqt_tools as pq
+import standardcurve as sc
 
 st.set_page_config(page_title="NeuroFig — data to publication figure", layout="wide")
 
@@ -89,7 +90,7 @@ tab_fig, tab_pdbqt, tab_calc = st.tabs(
 with tab_fig:
     analysis = st.radio("Analysis type",
                         ["Group comparison", "Time-course (ΔF/F)",
-                         "Dose-response (IC50/EC50)"], horizontal=True)
+                         "Dose-response (IC50/EC50)", "Standard curve"], horizontal=True)
     j1, j2 = st.columns(2)
     preset = j1.selectbox("Journal style", list(nc.JOURNAL_PRESETS.keys()), key="preset")
     columns = j2.selectbox("Column width", ["single", "double"], key="cols")
@@ -276,7 +277,7 @@ with tab_fig:
         render_downloads(fig, width_mm, preset, columns)
 
     # ----------------------------------------------------- dose-response
-    else:
+    elif analysis == "Dose-response (IC50/EC50)":
         st.subheader("1 · Dose-response data (a concentration column and a response column)")
         mode = st.radio("Provide data by", ["Upload a file", "Type / paste data"],
                         horizontal=True, key="drmode")
@@ -335,6 +336,87 @@ with tab_fig:
         fig = dr.make_dose_response_figure(ddf[conc_col].to_numpy(), ddf[resp_col].to_numpy(),
                                            fit, ylabel=ylabel, xlabel=xlabel, title=title,
                                            preset=preset, width_mm=width_mm)
+        st.pyplot(fig, use_container_width=False)
+        render_downloads(fig, width_mm, preset, columns)
+
+    # ----------------------------------------------------- standard curve
+    else:
+        st.subheader("1 · Standards (known concentration + measured signal)")
+        model_label = st.selectbox("Assay / curve model",
+                                   ["Linear (protein assay: BCA/Bradford)",
+                                    "qPCR (Ct vs log quantity)", "4PL (ELISA)"])
+        model = {"Linear (protein assay: BCA/Bradford)": "linear",
+                 "qPCR (Ct vs log quantity)": "qpcr", "4PL (ELISA)": "4pl"}[model_label]
+
+        smode = st.radio("Provide standards by", ["Upload a file", "Type / paste data"],
+                         horizontal=True, key="scmode")
+        sdf = None
+        if smode == "Upload a file":
+            up = st.file_uploader("CSV/Excel", type=["csv", "xlsx", "xls"], key="scup")
+            use_sample = st.checkbox("Use a sample standard set", value=up is None, key="scsamp")
+            if up is not None:
+                sdf = nc.load_table(up)
+            elif use_sample:
+                rng = np.random.default_rng(2)
+                if model == "linear":
+                    conc = np.repeat([0, 25, 50, 100, 200, 400, 800], 2).astype(float)
+                    sig = 0.002 * conc + 0.05 + rng.normal(0, 0.01, conc.size)
+                    sdf = pd.DataFrame({"concentration_ug_mL": conc, "A562": np.round(sig, 4)})
+                elif model == "qpcr":
+                    conc = np.repeat(np.logspace(1, 7, 7), 3)
+                    sig = -3.32 * np.log10(conc) + 40 + rng.normal(0, 0.15, conc.size)
+                    sdf = pd.DataFrame({"copies": conc, "Ct": np.round(sig, 2)})
+                else:
+                    conc = np.logspace(-3, 2, 10)
+                    sig = 0.05 + 1.95 / (1 + 10 ** ((0 - np.log10(conc)) * 1.2)) + rng.normal(0, 0.03, conc.size)
+                    sdf = pd.DataFrame({"analyte_ng_mL": conc, "OD450": np.round(sig, 4)})
+        else:
+            sdf = st.data_editor(pd.DataFrame({"concentration": [None] * 8, "signal": [None] * 8}),
+                                 num_rows="dynamic", use_container_width=True, key="scgrid")
+            sdf = sdf.apply(pd.to_numeric, errors="coerce").dropna()
+            sdf = sdf if not sdf.empty else None
+
+        if sdf is None or sdf.empty:
+            st.info("Provide standards to continue."); st.stop()
+        st.dataframe(sdf.head(12), use_container_width=True)
+
+        st.subheader("2 · Fit & unknowns")
+        cols_all = list(sdf.columns)
+        a1, a2 = st.columns(2)
+        conc_col = a1.selectbox("Concentration column", cols_all, index=0, key="scc")
+        sig_col = a2.selectbox("Signal column", [c for c in cols_all if c != conc_col], index=0, key="scs")
+        unknown_raw = st.text_input("Unknown sample signals (comma-separated, optional)", "",
+                                    help="Their concentrations are read off the fitted curve.")
+        xlabel = a1.text_input("X label", conc_col.replace("_", " "), key="scxl")
+        ylabel = a2.text_input("Y label", sig_col.replace("_", " "), key="scyl")
+        title = st.text_input("Title", "", key="sctitle")
+
+        try:
+            fit = sc.fit_standard_curve(sdf[conc_col].to_numpy(), sdf[sig_col].to_numpy(), model)
+        except (ValueError, RuntimeError) as e:
+            st.error(str(e)); st.stop()
+
+        st.subheader("3 · Result")
+        m1, m2 = st.columns(2)
+        m1.metric("R²", f"{fit.r_squared:.4f}")
+        if fit.efficiency is not None:
+            m2.metric("Amplification efficiency", f"{fit.efficiency*100:.0f}%",
+                      help="90–110% is the accepted qPCR range.")
+        if fit.r_squared < 0.98:
+            st.warning("R² below 0.98 — check standards for outliers or the wrong model.")
+
+        unknowns = None
+        ysig = [float(s) for s in unknown_raw.split(",") if s.strip()]
+        if ysig:
+            xs = fit.back_calculate(np.array(ysig))
+            unknowns = list(zip([f"s{i+1}" for i in range(len(ysig))], ysig))
+            st.write("**Back-calculated unknowns**")
+            st.table([{"Signal": y, "Concentration": (f"{x:.4g}" if x == x else "out of range")}
+                      for y, x in zip(ysig, xs)])
+
+        fig = sc.make_standard_curve_figure(sdf[conc_col].to_numpy(), sdf[sig_col].to_numpy(),
+                                            fit, unknowns=unknowns, xlabel=xlabel, ylabel=ylabel,
+                                            title=title, preset=preset, width_mm=width_mm)
         st.pyplot(fig, use_container_width=False)
         render_downloads(fig, width_mm, preset, columns)
 

@@ -72,6 +72,26 @@ def test_convert_guard_when_backend_missing():
         assert "Open Babel not found" in str(e)
 
 
+def test_real_conversion_assigns_charges():
+    # Only runs when Open Babel is installed. Verifies a real ligand converts to a
+    # valid PDBQT WITH non-zero Gasteiger charges (zero charges break docking).
+    if not p.obabel_available():
+        return
+    import subprocess
+    import tempfile
+    exe = p.find_obabel()
+    with tempfile.TemporaryDirectory() as d:
+        pdb = os.path.join(d, "lig.pdb"); out = os.path.join(d, "lig.pdbqt")
+        subprocess.run([exe, "-:CC(C)Cc1ccc(cc1)C(C)C(=O)O", "-O", pdb, "--gen3d"],
+                       capture_output=True, text=True)
+        p.pdb_to_pdbqt(pdb, out, mode="ligand", ph=7.4)
+        txt = open(out).read()
+        assert "ROOT" in txt and ("BRANCH" in txt or "TORSDOF" in txt)
+        atomlines = [l for l in txt.splitlines() if l.startswith(("ATOM", "HETATM"))]
+        charges = [float(l[70:76]) for l in atomlines if len(l) >= 76 and l[70:76].strip()]
+        assert any(abs(c) > 1e-6 for c in charges), "Gasteiger charges missing"
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):

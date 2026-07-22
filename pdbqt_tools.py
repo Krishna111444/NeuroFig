@@ -210,6 +210,9 @@ def pdb_to_pdbqt(in_path: str, out_path: str, *, mode: str = "receptor",
         cmd += ["-p", str(ph)]
     if mode == "receptor":
         cmd += ["-xr"]  # rigid receptor
+    # Gasteiger charges are NOT written by default — without this every atom gets
+    # a 0.000 charge and docking scores are meaningless. Verified against Open Babel.
+    cmd += ["--partialcharge", "gasteiger"]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0 or not os.path.exists(out_path):
         raise RuntimeError(f"Open Babel failed (exit {proc.returncode}):\n{proc.stderr.strip()}")
