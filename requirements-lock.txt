@@ -1,0 +1,14 @@
+# Exact versions used to validate NeuroFig (see VALIDATION.md).
+# For a bit-reproducible environment, install from this file:
+#   pip install -r requirements-lock.txt
+# (requirements.txt keeps looser >= bounds for everyday installs.)
+# Open Babel is a system package, not pip — install via apt/conda (see SELF_HOSTING.md).
+#
+# Validated on Python 3.13.13.
+numpy==2.4.6
+scipy==1.18.0
+pandas==2.3.3
+matplotlib==3.11.0
+statsmodels==0.14.6
+streamlit==1.60.0
+openpyxl==3.1.5

@@ -1,58 +1,81 @@
-# NeuroFig — starter codebase
+# NeuroFig
 
-Turn raw experimental data into a publication-ready figure with the correct
-statistics, in the browser, with no coding for the end user. This folder is a
-**working MVP seed** you extend with Claude Code.
+**Upload your data → get a journal-ready figure with the correct statistics.**
+Colourblind-safe, exact-mm vector export, no coding. A validated, deterministic
+figure-and-analysis tool for the life sciences.
 
-## What's here
+The statistics and drawing are done by **deterministic, tested code** — there is no
+machine-learning in the compute path, so nothing can be hallucinated. Every method
+is validated against ground truth. See **[VALIDATION.md](VALIDATION.md)**.
 
-| File | Role |
-|------|------|
-| `neurofig_core.py` | The deterministic engine: load data, infer columns, choose + run the right statistical test, render the figure. **No UI, no AI — testable on its own.** |
-| `app.py` | The Streamlit web UI that wraps the engine: upload → confirm columns → figure + stats → download PNG/PDF/SVG. |
-| `requirements.txt` | Python dependencies. |
-| `_test_core.py` | (optional) a smoke test showing the engine works end-to-end. |
+---
 
-## Run it locally (5 minutes)
+## What it does
 
+**Analysis workflows** (each computes the correct test and draws the figure):
+- **Group comparison** — auto-selects Welch's *t* / ANOVA+Tukey / Mann-Whitney /
+  Kruskal-Wallis+Dunn from a normality check, and tells you which it used.
+- **Time-course (ΔF/F)** — mean±SEM traces + a **cluster-based permutation test**
+  (validated false-positive control).
+- **Dose-response (IC50/EC50)** — 4-parameter logistic, Prism-grade, with CI.
+- **Standard curve** — linear / qPCR (with efficiency) / 4PL, with back-calculation
+  of unknowns.
+
+**Figure gallery** — the 20 recurring top-journal figure types (volcano, Manhattan,
+raincloud, swimmer, Circos, Sankey, treemap, split violin, …). Volcano, raincloud,
+and correlation heatmap accept your own uploads.
+
+**Structure prep** — clean a PDB and convert to **PDBQT** for AutoDock/Vina (via
+Open Babel), with correct Gasteiger charges.
+
+**Bench calculators** — 13 deterministic, reference-checked calculations (molarity,
+dilutions, DNA copy number, primer/protein properties, Beer–Lambert, CFU, doubling
+time, FDA human-equivalent dose, …).
+
+**Journal presets** (Nature/Cell/eLife/Science) with exact figure-width-in-mm export,
+in-figure editing, and a watermark/licence paywall.
+
+---
+
+## Run it locally
 ```bash
-# 1. get the code onto your machine, then inside this folder:
-python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt      # or requirements-lock.txt for exact versions
 streamlit run app.py
 ```
+For structure prep, also install Open Babel (`apt install openbabel`, or a conda env
+on Windows — see the guides below).
 
-Your browser opens at `http://localhost:8501`. Tick "use a sample dataset" and
-click **Generate figure** to see the whole loop with no data of your own.
+## Deploy it
+Self-host on your own server with **[SELF_HOSTING.md](SELF_HOSTING.md)** (Ubuntu +
+nginx + HTTPS + systemd), or use Streamlit Community Cloud (**[DEPLOY.md](DEPLOY.md)**).
 
-## Deploy it free (so others can use it)
+## Verify it
+```bash
+python -m tests.test_core        # 23 tests — engine + stats + figures
+# full suite: 66 tests across 9 files, all validated against ground truth
+```
 
-The fastest path is **Streamlit Community Cloud**: push this folder to a GitHub
-repo, connect the repo at streamlit.io, and it hosts the app on a public URL for
-free. Alternatives: Hugging Face Spaces, Render, Railway. None require a card to
-start.
+---
 
-## How to work with Claude Code on this
+## Project layout
+| File | Role |
+|---|---|
+| `neurofig_core.py` | Deterministic engine: load, infer, choose+run tests, draw, export |
+| `doseresponse.py` / `standardcurve.py` / `cluster_stats.py` | Validated analysis methods |
+| `gasteiger.py` / `pdbqt_tools.py` | Cheminformatics (charges, structure prep) |
+| `labcalc.py` | Bench calculators |
+| `journal_figures.py` | The 20-figure gallery (+ real-data versions) |
+| `licensing.py` | Offline signed license keys (paywall) |
+| `app.py` | Streamlit UI — calls the core only |
+| `tests/` | 66 tests validating every component |
+| `VALIDATION.md` | Full validation & reproducibility dossier |
+| `SELF_HOSTING.md` | Personal-server deployment runbook |
+| `NeuroFig_Blueprint.md` | Product/strategy blueprint |
 
-Open Claude Code in this folder and extend it one function at a time. The code is
-deliberately split so you can point Claude Code at a single piece. Good first asks:
+---
 
-- *"In `neurofig_core.py`, add a `run_nonparametric` option (Mann-Whitney for 2
-  groups, Kruskal-Wallis + Dunn for 3+) and let `app.py` offer it when the Shapiro
-  warning fires."*
-- *"Add a second figure type to `neurofig_core.py`: a paired before/after plot with
-  connecting lines, and a Wilcoxon signed-rank test."*
-- *"In `app.py`, add journal style presets (Nature, Cell, eLife) that change font
-  sizes, figure width in mm, and colour palette."*
-- *"Add a watermark to the free PNG export and gate the clean PDF/SVG behind a
-  simple payment check."*
-
-Always ask Claude Code to **run `_test_core.py` after each change** so you catch
-breakage immediately even though you don't read the code yourself.
-
-## The one cost to remember
-
-Running this app itself is free/cheap. The **AI layer** you add later (plain-English
-→ figure) calls a model API that is billed per use — that is your only real running
-cost, and your price per figure must stay above it. See the blueprint document for
-the full monetization plan.
+## Scientific integrity
+NeuroFig reports the test it used, never prints `p = 0`, refuses to extrapolate a
+fabricated value (returns NaN out of range), and states its limitations openly in
+[VALIDATION.md](VALIDATION.md). Uploaded data is processed in memory and not stored
+after the session.
