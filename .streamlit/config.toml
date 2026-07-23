@@ -7,6 +7,11 @@ gatherUsageStats = false
 [browser]
 gatherUsageStats = false
 
+# Dark theme matched to the Kaelith / Sciverse platform (sciverse111.netlify.app)
 [theme]
-base = "light"
-primaryColor = "#0072B2"
+base = "dark"
+primaryColor = "#2563FF"
+backgroundColor = "#0A0F1E"
+secondaryBackgroundColor = "#111A2E"
+textColor = "#E6F1FF"
+font = "sans serif"

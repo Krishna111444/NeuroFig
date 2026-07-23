@@ -105,6 +105,13 @@ enableXsrfProtection = true
 gatherUsageStats = false
 [browser]
 gatherUsageStats = false
+[theme]
+base = "dark"
+primaryColor = "#2563FF"
+backgroundColor = "#0A0F1E"
+secondaryBackgroundColor = "#111A2E"
+textColor = "#E6F1FF"
+font = "sans serif"
 EOF
 ```
 

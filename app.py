@@ -25,7 +25,90 @@ import neurofig_core as nc
 import pdbqt_tools as pq
 import standardcurve as sc
 
-st.set_page_config(page_title="NeuroFig — data to publication figure", layout="wide")
+st.set_page_config(page_title="NeuroFig — Kaelith", page_icon="🔬", layout="wide")
+
+# Kaelith / Sciverse dark theme — matched to sciverse111.netlify.app so the tool
+# feels native when users arrive from the main site.
+_KAELITH_SITE = "https://sciverse111.netlify.app/"
+_THEME_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap');
+
+:root {
+  --bg:#0A0F1E; --panel:#111A2E; --surface:#152138; --raised:#18243E;
+  --ink:#E6F1FF; --muted:#A7B4CC; --primary:#2563FF; --primary-l:#3D7BFF;
+  --cyan:#00D4FF; --purple:#7B61FF; --border:rgba(140,170,220,.14);
+  --border-2:rgba(140,170,220,.26); --radius:16px;
+  --grad:linear-gradient(120deg,#2563FF,#7B61FF);
+  --grad-text:linear-gradient(100deg,#00D4FF,#7CA8FF 55%,#B88CFF);
+  --glow:0 8px 30px rgba(37,99,255,.45);
+}
+html, body, [class*="css"], .stApp, .stMarkdown, p, span, label, div {
+  font-family:'Inter',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+}
+.stApp {
+  background:
+    radial-gradient(circle at 1px 1px, rgba(120,160,220,.055) 1px, transparent 0) 0 0/22px 22px,
+    radial-gradient(1200px 600px at 80% -10%, rgba(37,99,255,.12), transparent 60%),
+    #0A0F1E;
+  color:var(--ink);
+}
+h1,h2,h3,h4,h5 { font-family:'Plus Jakarta Sans','Inter',sans-serif !important;
+  color:var(--ink); letter-spacing:-.01em; }
+/* main title -> gradient text */
+.block-container h1:first-of-type {
+  font-weight:800; font-size:2.7rem; background:var(--grad-text);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+.block-container { padding-top:2.2rem; max-width:1200px; }
+
+/* buttons */
+.stButton>button, .stDownloadButton>button, .stLinkButton>a {
+  border-radius:12px; font-weight:600; border:1px solid var(--border-2);
+  background:var(--surface); color:var(--ink); transition:all .15s ease;
+}
+.stButton>button:hover, .stDownloadButton>button:hover, .stLinkButton>a:hover {
+  border-color:var(--primary-l); box-shadow:0 4px 18px rgba(37,99,255,.25);
+}
+.stButton>button[kind="primary"], .stButton>button[data-testid="baseButton-primary"] {
+  background:var(--grad); border:none; color:#fff; box-shadow:var(--glow);
+}
+/* sidebar */
+[data-testid="stSidebar"] { background:#0C1526; border-right:1px solid var(--border); }
+/* tabs */
+.stTabs [data-baseweb="tab-list"] { gap:6px; border-bottom:1px solid var(--border); }
+.stTabs [data-baseweb="tab"] { border-radius:10px 10px 0 0; padding:8px 16px; color:var(--muted); }
+.stTabs [aria-selected="true"] { color:var(--primary-l) !important; }
+.stTabs [data-baseweb="tab-highlight"] { background:var(--primary); }
+/* panels: metrics, expander, tables */
+[data-testid="stMetric"], [data-testid="stExpander"], [data-testid="stTable"], .stDataFrame {
+  background:var(--panel); border:1px solid var(--border); border-radius:14px;
+}
+[data-testid="stMetric"] { padding:14px 16px; }
+[data-testid="stMetricValue"] { color:var(--cyan); }
+/* inputs */
+[data-baseweb="input"], [data-baseweb="select"]>div, [data-baseweb="textarea"] {
+  border-radius:10px !important; background:var(--surface) !important;
+}
+/* alerts a touch softer */
+[data-testid="stNotification"], .stAlert { border-radius:12px; }
+/* hide Streamlit chrome for a clean product look */
+#MainMenu, footer, [data-testid="stToolbar"] { visibility:hidden; }
+/* the Kaelith brand bar */
+.kaelith-bar { display:flex; align-items:center; justify-content:space-between;
+  padding:.55rem .95rem; margin-bottom:1rem; border:1px solid var(--border);
+  border-radius:14px; background:linear-gradient(120deg, rgba(37,99,255,.10), rgba(123,97,255,.08));
+  font-size:.9rem; }
+.kaelith-bar a { color:var(--primary-l); text-decoration:none; font-weight:600; }
+.kaelith-bar .brand { font-family:'Plus Jakarta Sans',sans-serif; font-weight:800; color:var(--ink); }
+.kaelith-bar .dot { color:var(--cyan); }
+</style>
+"""
+st.markdown(_THEME_CSS, unsafe_allow_html=True)
+st.markdown(
+    f'<div class="kaelith-bar"><span class="brand">Kaelith <span class="dot">●</span> '
+    f'NeuroFig</span><a href="{_KAELITH_SITE}" target="_blank">← Back to Kaelith ↗</a></div>',
+    unsafe_allow_html=True)
 
 
 def _secret(name: str, default: str = "") -> str:
