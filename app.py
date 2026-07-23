@@ -145,25 +145,27 @@ st.caption("Data → journal-ready figure with the correct statistics. "
            "Colourblind-safe, vector export, no coding.")
 
 
-def render_downloads(fig, width_mm, preset, columns):
-    """Gated download UI: watermarked free preview vs exact-mm clean vectors."""
+def render_downloads(fig, width_mm, preset, columns, key="dl"):
+    """Gated download UI: watermarked free preview vs exact-mm clean vectors.
+
+    `key` must be unique per call site: Streamlit renders every tab on each run, so
+    two identical download buttons would otherwise collide (StreamlitDuplicateElementId).
+    """
     st.divider()
     if unlocked:
         st.write(f"**Clean download** — sized to {width_mm:.0f} mm ({preset}, {columns} column)")
         d1, d2, d3 = st.columns(3)
         d1.download_button("PNG (400 dpi)", nc.figure_to_bytes(fig, "png", exact=True),
-                           "figure.png", "image/png")
+                           "figure.png", "image/png", key=f"{key}_png")
         d2.download_button("PDF (vector)", nc.figure_to_bytes(fig, "pdf", exact=True),
-                           "figure.pdf", "application/pdf")
+                           "figure.pdf", "application/pdf", key=f"{key}_pdf")
         d3.download_button("SVG (vector)", nc.figure_to_bytes(fig, "svg", exact=True),
-                           "figure.svg", "image/svg+xml")
+                           "figure.svg", "image/svg+xml", key=f"{key}_svg")
     else:
         st.write("**Free preview** (watermarked). Unlock clean vector exports in the sidebar.")
         st.download_button("Download watermarked PNG",
                            nc.watermarked_png(fig, "NeuroFig — preview"),
-                           "figure_preview.png", "image/png")
-        if _BUY_URL:
-            st.link_button("Get clean PDF/SVG — buy a license", _BUY_URL)
+                           "figure_preview.png", "image/png", key=f"{key}_wm")
 
 
 tab_fig, tab_gallery, tab_pdbqt, tab_calc = st.tabs(
@@ -280,7 +282,7 @@ with tab_fig:
         if stat.pairwise:
             st.table([{"Group 1": p["g1"], "Group 2": p["g2"],
                        "p-value": p["p_text"], "Significance": p["stars"]} for p in stat.pairwise])
-        render_downloads(fig, width_mm, preset, columns)
+        render_downloads(fig, width_mm, preset, columns, key="grp")
 
     # ----------------------------------------------------- time-course ΔF/F
     elif analysis == "Time-course (ΔF/F)":
@@ -358,7 +360,7 @@ with tab_fig:
                                         title=title, sig_windows=sig_windows,
                                         preset=preset, width_mm=width_mm)
         st.pyplot(fig, use_container_width=False)
-        render_downloads(fig, width_mm, preset, columns)
+        render_downloads(fig, width_mm, preset, columns, key="tc")
 
     # ----------------------------------------------------- dose-response
     elif analysis == "Dose-response (IC50/EC50)":
@@ -421,7 +423,7 @@ with tab_fig:
                                            fit, ylabel=ylabel, xlabel=xlabel, title=title,
                                            preset=preset, width_mm=width_mm)
         st.pyplot(fig, use_container_width=False)
-        render_downloads(fig, width_mm, preset, columns)
+        render_downloads(fig, width_mm, preset, columns, key="dr")
 
     # ----------------------------------------------------- standard curve
     else:
@@ -502,7 +504,7 @@ with tab_fig:
                                             fit, unknowns=unknowns, xlabel=xlabel, ylabel=ylabel,
                                             title=title, preset=preset, width_mm=width_mm)
         st.pyplot(fig, use_container_width=False)
-        render_downloads(fig, width_mm, preset, columns)
+        render_downloads(fig, width_mm, preset, columns, key="sc")
 
 
 # ============================================================ FIGURE GALLERY
@@ -576,7 +578,7 @@ with tab_gallery:
             except Exception:
                 pass
         st.pyplot(fig, use_container_width=False)
-        render_downloads(fig, gwidth, gpreset, gcols)
+        render_downloads(fig, gwidth, gpreset, gcols, key="galrd")
     else:
         gtitle = st.text_input("Title (optional)", "", key="gal_title")
         fig = jf.FIGURES[choice](preset=gpreset, width_mm=gwidth)
@@ -588,7 +590,7 @@ with tab_gallery:
         st.caption("Shown with sample data. Volcano, raincloud, and correlation heatmap "
                    "also accept your own uploads.")
         st.pyplot(fig, use_container_width=False)
-        render_downloads(fig, gwidth, gpreset, gcols)
+        render_downloads(fig, gwidth, gpreset, gcols, key="galsmpl")
 
 
 # ============================================================ PDB → PDBQT
