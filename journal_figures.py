@@ -787,3 +787,219 @@ REAL_DATA_FIGURES = {
     "06 Raincloud": "raincloud",
     "15 Correlation heatmap": "correlation",
 }
+
+
+# ============================================================================
+# MULTIOMICS / SET-COMPARISON FIGURES (Venn, UpSet, enrichment, PCA, composition)
+# Each has a bundled sample generator (for the gallery) and, where useful, a
+# from_data() for real uploads, plus a sample-CSV maker.
+# ============================================================================
+from matplotlib.patches import Circle  # noqa: E402
+
+
+def _set_regions(sets):
+    """Region counts for 2 or 3 sets (labelled by membership tuple)."""
+    if len(sets) == 2:
+        a, b = sets
+        return {"10": len(a - b), "01": len(b - a), "11": len(a & b)}
+    a, b, c = sets
+    return {"100": len(a - b - c), "010": len(b - a - c), "001": len(c - a - b),
+            "110": len((a & b) - c), "101": len((a & c) - b), "011": len((b & c) - a),
+            "111": len(a & b & c)}
+
+
+def _draw_venn(ax, sets, labels, colors):
+    if len(sets) == 2:
+        centres = [(-0.35, 0), (0.35, 0)]; r = 0.6
+        pos = {"10": (-0.55, 0), "01": (0.55, 0), "11": (0, 0)}
+        lab = {0: (-0.5, 0.65), 1: (0.5, 0.65)}
+    else:
+        centres = [(-0.35, 0.22), (0.35, 0.22), (0.0, -0.38)]; r = 0.62
+        pos = {"100": (-0.55, 0.55), "010": (0.55, 0.55), "001": (0.0, -0.72),
+               "110": (0.0, 0.55), "101": (-0.38, -0.18), "011": (0.38, -0.18),
+               "111": (0.0, 0.08)}
+        lab = {0: (-0.7, 0.7), 1: (0.7, 0.7), 2: (0.0, -0.95)}
+    for i, (cx, cy) in enumerate(centres):
+        ax.add_patch(Circle((cx, cy), r, facecolor=colors[i], alpha=0.35,
+                            edgecolor=colors[i], lw=1.4))
+        ax.text(*lab[i], labels[i], color=colors[i], fontweight="bold", ha="center", fontsize=8)
+    counts = _set_regions(sets)
+    for key, (x, y) in pos.items():
+        ax.text(x, y, str(counts.get(key, 0)), ha="center", va="center", fontsize=8)
+    ax.set_xlim(-1.2, 1.2); ax.set_ylim(-1.25, 1.15); ax.set_aspect("equal"); ax.axis("off")
+
+
+def venn(preset=None, width_mm=None):
+    """Venn diagram of overlapping feature sets (e.g. genes across omics layers)."""
+    fig, ax = _new(preset, width_mm, 3.4, 3.2)
+    rng = _rng(30)
+    allg = np.array([f"G{i}" for i in range(220)])
+    sets = [set(rng.choice(allg, n, replace=False)) for n in (85, 95, 75)]
+    _draw_venn(ax, sets, ["RNA-seq", "Proteomics", "ATAC-seq"], OKABE_ITO[:3])
+    fig.tight_layout(); return fig
+
+
+def venn_from_data(df, set_cols, preset=None, width_mm=None):
+    """Venn from 2–3 columns, each listing the members of one set."""
+    if not (2 <= len(set_cols) <= 3):
+        raise ValueError("Venn needs 2 or 3 set columns (use UpSet for more).")
+    sets = [set(df[c].dropna().astype(str)) for c in set_cols]
+    fig, ax = _new(preset, width_mm, 3.4, 3.2)
+    _draw_venn(ax, sets, [str(c) for c in set_cols], OKABE_ITO[:len(sets)])
+    fig.tight_layout(); return fig, []
+
+
+def upset(preset=None, width_mm=None):
+    """UpSet plot: intersection sizes across many sets (Venn beyond 3 sets)."""
+    apply_preset(preset) if preset else apply_style()
+    rng = _rng(31)
+    names = ["RNA", "Protein", "ATAC", "Methyl", "Metab"]
+    allg = np.arange(400)
+    sets = {n: set(rng.choice(allg, s, replace=False)) for n, s in zip(names, [160, 150, 140, 120, 110])}
+    import itertools
+    combos = []
+    for r in range(1, len(names) + 1):
+        for combo in itertools.combinations(names, r):
+            inter = set(allg)
+            for n in combo:
+                inter &= sets[n]
+            for n in names:
+                if n not in combo:
+                    inter -= sets[n]
+            if len(inter):
+                combos.append((combo, len(inter)))
+    combos.sort(key=lambda x: -x[1]); combos = combos[:12]
+
+    fig = plt.figure(figsize=(5.2, 3.4))
+    if width_mm:
+        set_width_mm(fig, width_mm)
+    gs = fig.add_gridspec(2, 1, height_ratios=[2, 1.2], hspace=0.05)
+    axb = fig.add_subplot(gs[0]); axm = fig.add_subplot(gs[1], sharex=axb)
+    xs = np.arange(len(combos))
+    axb.bar(xs, [c[1] for c in combos], color=OKABE_ITO[0], width=0.6)
+    axb.set_ylabel("Intersection"); axb.spines["bottom"].set_visible(False)
+    axb.tick_params(labelbottom=False)
+    for j, n in enumerate(names):
+        for i, (combo, _) in enumerate(combos):
+            on = n in combo
+            axm.scatter(i, j, s=26, color=OKABE_ITO[0] if on else "0.85", zorder=3)
+        # connect the dots of each intersection
+    for i, (combo, _) in enumerate(combos):
+        ys = [names.index(n) for n in combo]
+        if len(ys) > 1:
+            axm.plot([i, i], [min(ys), max(ys)], color=OKABE_ITO[0], lw=1.2, zorder=2)
+    axm.set_yticks(range(len(names))); axm.set_yticklabels(names, fontsize=6)
+    axm.set_xticks([]); axm.set_ylim(-0.6, len(names) - 0.4)
+    for sp in ("top", "right", "bottom"):
+        axm.spines[sp].set_visible(False)
+    fig.tight_layout(); return fig
+
+
+def enrichment_dotplot(preset=None, width_mm=None):
+    """GO/KEGG enrichment dot-plot: gene ratio vs term, size=count, colour=p.adjust."""
+    fig, ax = _new(preset, width_mm, 4.2, 3.4)
+    rng = _rng(32)
+    terms = ["Synaptic signaling", "Ion transport", "Immune response",
+             "Cell cycle", "Oxidative phosphorylation", "Apoptosis",
+             "MAPK cascade", "Lipid metabolism", "DNA repair", "Chemotaxis"]
+    ratio = np.sort(rng.uniform(0.05, 0.45, len(terms)))
+    count = rng.integers(8, 80, len(terms))
+    padj = 10 ** (-rng.uniform(1.5, 6, len(terms)))
+    sc = ax.scatter(ratio, range(len(terms)), s=count * 2.5,
+                    c=-np.log10(padj), cmap="viridis", edgecolor="0.3", linewidth=0.4)
+    ax.set_yticks(range(len(terms))); ax.set_yticklabels(terms, fontsize=6)
+    ax.set_xlabel("Gene ratio")
+    cb = fig.colorbar(sc, ax=ax, fraction=0.045, pad=0.02); cb.set_label("-log10 p.adjust", fontsize=6)
+    fig.tight_layout(); return fig
+
+
+def pca_ordination(preset=None, width_mm=None):
+    """PCA ordination: samples projected on PC1/PC2, coloured by group."""
+    fig, ax = _new(preset, width_mm, 3.8, 3.2)
+    rng = _rng(33)
+    groups = np.repeat(["Control", "Disease", "Treated"], 12)
+    centres = {"Control": 0, "Disease": 4, "Treated": 2}
+    X = np.array([rng.normal(centres[g], 1, 40) + rng.normal(0, 1, 40) for g in groups])
+    Xc = X - X.mean(0)
+    U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
+    scores = U * S
+    var = S ** 2 / (S ** 2).sum()
+    for i, g in enumerate(["Control", "Disease", "Treated"]):
+        m = groups == g
+        ax.scatter(scores[m, 0], scores[m, 1], s=26, color=OKABE_ITO[i], label=g,
+                   edgecolor="white", linewidth=0.5)
+    ax.set_xlabel(f"PC1 ({var[0]*100:.0f}%)"); ax.set_ylabel(f"PC2 ({var[1]*100:.0f}%)")
+    ax.axhline(0, color="0.85", lw=0.6); ax.axvline(0, color="0.85", lw=0.6)
+    ax.legend(frameon=False, fontsize=6.5)
+    fig.tight_layout(); return fig
+
+
+def stacked_composition(preset=None, width_mm=None):
+    """Stacked composition bars (relative abundance) — microbiome / cell types."""
+    fig, ax = _new(preset, width_mm, 4.2, 3.0)
+    rng = _rng(34)
+    samples = [f"S{i+1}" for i in range(10)]
+    taxa = ["Firmicutes", "Bacteroidetes", "Proteobacteria", "Actinobacteria", "Other"]
+    comp = rng.uniform(0.2, 1, (len(samples), len(taxa)))
+    comp = comp / comp.sum(1, keepdims=True)
+    bottom = np.zeros(len(samples))
+    for j, tx in enumerate(taxa):
+        ax.bar(range(len(samples)), comp[:, j], bottom=bottom,
+               color=OKABE_ITO[j % len(OKABE_ITO)], label=tx, width=0.8)
+        bottom += comp[:, j]
+    ax.set_xticks(range(len(samples))); ax.set_xticklabels(samples, fontsize=6)
+    ax.set_ylabel("Relative abundance"); ax.set_ylim(0, 1)
+    ax.legend(frameon=False, fontsize=5.5, ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.18))
+    fig.tight_layout(); return fig
+
+
+# ---- sample-CSV makers (for the format users upload) ----
+def sample_venn_df():
+    rng = np.random.default_rng(30)
+    allg = np.array([f"GENE{i:04d}" for i in range(220)])
+    cols = {}
+    for name, n in [("RNAseq", 85), ("Proteomics", 95), ("ATACseq", 75)]:
+        members = sorted(rng.choice(allg, n, replace=False))
+        cols[name] = members
+    m = max(len(v) for v in cols.values())
+    return pd.DataFrame({k: v + [None] * (m - len(v)) for k, v in cols.items()})
+
+
+def sample_enrichment_df():
+    rng = np.random.default_rng(32)
+    terms = ["Synaptic signaling", "Ion transport", "Immune response", "Cell cycle",
+             "Oxidative phosphorylation", "Apoptosis", "MAPK cascade", "Lipid metabolism",
+             "DNA repair", "Chemotaxis"]
+    return pd.DataFrame({"term": terms,
+                         "gene_ratio": np.round(rng.uniform(0.05, 0.45, len(terms)), 3),
+                         "count": rng.integers(8, 80, len(terms)),
+                         "p_adjust": rng.uniform(1e-6, 3e-2, len(terms))})
+
+
+def sample_pca_df():
+    rng = np.random.default_rng(33)
+    groups = np.repeat(["Control", "Disease", "Treated"], 12)
+    centres = {"Control": 0, "Disease": 4, "Treated": 2}
+    X = np.array([rng.normal(centres[g], 1, 40) + rng.normal(0, 1, 40) for g in groups])
+    df = pd.DataFrame(np.round(X, 3), columns=[f"feature{i:02d}" for i in range(40)])
+    df.insert(0, "group", groups)
+    df.insert(0, "sample", [f"S{i+1:02d}" for i in range(len(groups))])
+    return df
+
+
+def sample_composition_df():
+    rng = np.random.default_rng(34)
+    taxa = ["Firmicutes", "Bacteroidetes", "Proteobacteria", "Actinobacteria", "Other"]
+    comp = rng.uniform(0.2, 1, (10, len(taxa))); comp = comp / comp.sum(1, keepdims=True)
+    df = pd.DataFrame(np.round(comp, 4), columns=taxa)
+    df.insert(0, "sample", [f"S{i+1}" for i in range(10)])
+    return df
+
+
+FIGURES.update({
+    "21 Venn diagram": venn,
+    "22 UpSet plot": upset,
+    "23 Enrichment dot-plot": enrichment_dotplot,
+    "24 PCA / ordination": pca_ordination,
+    "25 Stacked composition": stacked_composition,
+})

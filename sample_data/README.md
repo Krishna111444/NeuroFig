@@ -15,6 +15,13 @@ listed below. All values are generated (no real subjects); safe to share.
 | `7_correlation.csv` | Gallery → Correlation heatmap | select all 6 columns | Recovers IL6↔TNFα +0.73, IL10↔CRP −0.65, glucose↔insulin +0.46 |
 | `8_protein_1CRN.pdb` | PDB → PDBQT (receptor) | — | Real protein (crambin); clean → rigid receptor PDBQT with Gasteiger charges |
 | `9_ligand_aspirin.pdb` | PDB → PDBQT (ligand) | — | Real ligand; → flexible PDBQT, 3 rotatable bonds, charges assigned |
+| `10_venn_sets.csv` | Gallery → Venn diagram | one column per set (member IDs) | 3-way overlap of RNAseq/Proteomics/ATACseq gene lists |
+| `11_enrichment.csv` | Gallery → Enrichment dot-plot | `term`, `gene_ratio`, `count`, `p_adjust` | GO/KEGG-style enrichment dot-plot |
+| `12_pca_matrix.csv` | Gallery → PCA / ordination | `sample`, `group`, `feature*` | Samples separate by group on PC1/PC2 |
+| `13_composition.csv` | Gallery → Stacked composition | `sample` + one column per taxon | Relative-abundance stacked bars |
+
+**Multiomics figures** (Venn, UpSet, enrichment, PCA, stacked composition) currently
+render in the gallery from built-in sample data; these CSVs show the upload format.
 
 Reference conversion outputs are included (`*.receptor.pdbqt`, `*.ligand.pdbqt`) so
 you can compare what the tool should produce.
