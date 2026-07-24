@@ -16,7 +16,7 @@ import neurofig_core as nc  # noqa: E402
 
 
 def test_registry_size():
-    assert len(jf.FIGURES) == 25  # 20 journal + 5 multiomics
+    assert len(jf.FIGURES) == 29  # 20 journal + 5 multiomics + 4 clinical
 
 
 def test_venn_counts_from_data():

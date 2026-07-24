@@ -524,7 +524,8 @@ with tab_gallery:
         sample = {"volcano": jf.sample_volcano_df, "raincloud": jf.sample_raincloud_df,
                   "correlation": jf.sample_correlation_df, "venn": jf.sample_venn_df,
                   "upset": jf.sample_upset_df, "enrichment": jf.sample_enrichment_df,
-                  "pca": jf.sample_pca_df, "composition": jf.sample_composition_df}[kind]()
+                  "pca": jf.sample_pca_df, "composition": jf.sample_composition_df,
+                  "km": jf.sample_km_df, "forest": jf.sample_forest_df}[kind]()
         st.info("This figure accepts your own data. Download the template to see the "
                 "expected format, or upload a matching file.")
         st.download_button("⬇ Sample template (CSV)", sample.to_csv(index=False),
@@ -602,7 +603,7 @@ with tab_gallery:
                 fig, warns = jf.pca_from_data(
                     df, feat_cols, group_col=None if group_col == "(none)" else group_col,
                     preset=gpreset, width_mm=gwidth)
-            else:  # composition
+            elif kind == "composition":
                 sample_col = st.selectbox("Sample-label column", cols)
                 cat_cols = st.multiselect("Category columns (abundances)",
                                           [c for c in cols if c != sample_col],
@@ -611,6 +612,26 @@ with tab_gallery:
                     st.warning("Select at least 2 category columns."); st.stop()
                 fig, warns = jf.stacked_composition_from_data(df, sample_col, cat_cols,
                                                               preset=gpreset, width_mm=gwidth)
+            elif kind == "km":
+                c1, c2, c3 = st.columns(3)
+                time_col = c1.selectbox("Time column", cols)
+                event_col = c2.selectbox("Event column (1=event, 0=censored)",
+                                         [c for c in cols if c != time_col])
+                group_col = c3.selectbox("Group column (optional)", ["(none)"] + cols)
+                fig, warns = jf.km_from_data(
+                    df, time_col, event_col,
+                    group_col=None if group_col == "(none)" else group_col,
+                    preset=gpreset, width_mm=gwidth)
+            else:  # forest
+                c1, c2 = st.columns(2)
+                label_col = c1.selectbox("Study/label column", cols)
+                est_col = c2.selectbox("Estimate column", [c for c in cols if c != label_col])
+                c3, c4, c5 = st.columns(3)
+                low_col = c3.selectbox("CI lower column", [c for c in cols if c != label_col])
+                high_col = c4.selectbox("CI upper column", [c for c in cols if c != label_col])
+                ref = c5.number_input("Reference line", value=0.0)
+                fig, warns = jf.forest_from_data(df, label_col, est_col, low_col, high_col,
+                                                 ref=ref, preset=gpreset, width_mm=gwidth)
         except (ValueError, RuntimeError) as e:
             st.error(str(e)); st.stop()
         for m in warns:

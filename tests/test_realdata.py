@@ -171,6 +171,36 @@ def test_composition_drops_zero_sample_and_normalizes():
     assert any("zero total" in m for m in w)   # S2 dropped
 
 
+def test_km_logrank_and_render():
+    import numpy as np
+    # two clearly-different survival groups -> log-rank should be significant
+    rng = np.random.default_rng(1)
+    rows = []
+    for arm, scale in [("A", 8), ("B", 30)]:
+        for _ in range(80):
+            rows.append({"t": round(float(rng.exponential(scale)), 1), "e": 1, "arm": arm})
+    df = pd.DataFrame(rows)
+    fig, w = jf.km_from_data(df, "t", "e", "arm")
+    _ok(fig)
+    chi2, p = jf._logrank(df["t"].to_numpy(), df["e"].to_numpy(), df["arm"].to_numpy())
+    assert p < 0.05, f"expected significant separation, got p={p}"
+
+
+def test_km_event_coercion():
+    df = pd.DataFrame({"t": [5, 10, 15, 20], "e": [2, 0, 1, 3]})  # 2,3 -> events
+    fig, w = jf.km_from_data(df, "t", "e")
+    _ok(fig)
+    assert any("0 (censored)" in m or "treated as events" in m for m in w)
+
+
+def test_forest_guards():
+    df = pd.DataFrame({"study": ["S1", "S2", "S3"],
+                       "est": [0.3, 0.5, None], "lo": [0.1, 0.2, 0.0], "hi": [0.5, 0.8, 1.0]})
+    fig, w = jf.forest_from_data(df, "study", "est", "lo", "hi")
+    _ok(fig)
+    assert any("Dropped" in m for m in w)   # the None row dropped
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):

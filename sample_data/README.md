@@ -20,8 +20,12 @@ listed below. All values are generated (no real subjects); safe to share.
 | `12_pca_matrix.csv` | Gallery → PCA / ordination | `sample`, `group`, `feature*` | Samples separate by group on PC1/PC2 |
 | `13_composition.csv` | Gallery → Stacked composition | `sample` + one column per taxon | Relative-abundance stacked bars |
 
-**Multiomics figures** (Venn, UpSet, enrichment, PCA, stacked composition) currently
-render in the gallery from built-in sample data; these CSVs show the upload format.
+| `14_survival.csv` | Gallery → Kaplan-Meier survival | time=`time_months`, event=`event`, group=`arm` | Survival curves + log-rank p (Standard vs Experimental) |
+| `15_forest.csv` | Gallery → Forest plot | label=`study`, est=`estimate`, CI=`ci_low`/`ci_high` | Forest plot of effects with 95% CIs |
+
+All gallery figures (25 → 29) render from built-in sample data; the multiomics and
+clinical ones (Venn, UpSet, enrichment, PCA, composition, Kaplan-Meier, forest) also
+accept your own uploads — these CSVs show the expected format.
 
 Reference conversion outputs are included (`*.receptor.pdbqt`, `*.ligand.pdbqt`) so
 you can compare what the tool should produce.

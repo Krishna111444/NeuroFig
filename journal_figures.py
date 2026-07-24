@@ -1217,3 +1217,204 @@ REAL_DATA_FIGURES.update({
     "21 Venn diagram": "venn", "22 UpSet plot": "upset", "23 Enrichment dot-plot": "enrichment",
     "24 PCA / ordination": "pca", "25 Stacked composition": "composition",
 })
+
+
+# ============================================================================
+# CLINICAL / BIOMEDICAL figures: ridgeline, chord, Kaplan-Meier (+log-rank), forest
+# ============================================================================
+
+def ridgeline(preset=None, width_mm=None):
+    """Ridgeline (joyplot): stacked density distributions across an ordered factor."""
+    fig, ax = _new(preset, width_mm, 3.8, 3.6)
+    rng = _rng(40)
+    groups = ["Day 1", "Day 3", "Day 7", "Day 14", "Day 21", "Day 28"]
+    for i, g in enumerate(groups):
+        d = rng.normal(i * 0.55, 1.0 + 0.08 * i, 220)
+        kde = stats.gaussian_kde(d)
+        xs = np.linspace(d.min(), d.max(), 200); ys = kde(xs); ys = ys / ys.max() * 1.5
+        base = len(groups) - i
+        ax.fill_between(xs, base, base + ys, color=OKABE_ITO[i % len(OKABE_ITO)],
+                        alpha=0.75, lw=0.8, edgecolor="white", zorder=len(groups) - i)
+    ax.set_yticks([len(groups) - i for i in range(len(groups))])
+    ax.set_yticklabels(groups, fontsize=6)
+    ax.set_xlabel("Expression"); ax.set_ylabel("")
+    for sp in ("left", "right"):
+        ax.spines[sp].set_visible(False)
+    fig.tight_layout(); return fig
+
+
+def chord_diagram(preset=None, width_mm=None):
+    """Chord diagram: weighted flows between categories, arranged on a circle."""
+    fig, ax = _new(preset, width_mm, 3.6, 3.6)
+    rng = _rng(41)
+    n = 6; labels = [f"Cell{i+1}" for i in range(n)]
+    flow = rng.uniform(0, 1, (n, n)); flow = (flow + flow.T) / 2; np.fill_diagonal(flow, 0)
+    totals = flow.sum(1); grand = totals.sum(); gap = 0.03 * 2 * np.pi
+    spans = totals / grand * (2 * np.pi - n * gap)
+    start = {}; a = np.pi / 2
+    for i in range(n):
+        start[i] = a; a -= spans[i] + gap
+    for i in range(n):
+        ax.add_patch(Wedge((0, 0), 1.0, np.degrees(start[i] - spans[i]), np.degrees(start[i]),
+                           width=0.08, facecolor=OKABE_ITO[i % len(OKABE_ITO)], edgecolor="white"))
+        mid = start[i] - spans[i] / 2
+        ax.text(1.12 * np.cos(mid), 1.12 * np.sin(mid), labels[i], ha="center", va="center", fontsize=6)
+    pt = lambda ang: (0.9 * np.cos(ang), 0.9 * np.sin(ang))
+    sub = {i: start[i] for i in range(n)}
+    for i in range(n):
+        for j in range(i + 1, n):
+            f = flow[i, j]
+            if f / grand < 0.01:
+                continue
+            w = f / grand * (2 * np.pi - n * gap)
+            ai0 = sub[i]; ai1 = sub[i] - w; sub[i] = ai1
+            aj0 = sub[j]; aj1 = sub[j] - w; sub[j] = aj1
+            verts = [pt(ai0), (0, 0), pt(aj0), pt(aj1), (0, 0), pt(ai1), pt(ai0)]
+            codes = [Path.MOVETO, Path.CURVE3, Path.CURVE3, Path.LINETO,
+                     Path.CURVE3, Path.CURVE3, Path.CLOSEPOLY]
+            ax.add_patch(mpatches.PathPatch(Path(verts, codes),
+                         facecolor=OKABE_ITO[i % len(OKABE_ITO)], edgecolor="none", alpha=0.4))
+    ax.set_xlim(-1.3, 1.3); ax.set_ylim(-1.3, 1.3); ax.set_aspect("equal"); ax.axis("off")
+    fig.tight_layout(); return fig
+
+
+# ---- Kaplan-Meier survival + log-rank (real analysis) ----
+def _km_estimate(dur, ev):
+    dur = np.asarray(dur, float); ev = np.asarray(ev, int)
+    times = np.array(sorted(set(dur)))
+    t_out = [0.0]; s_out = [1.0]; s = 1.0; cens = []
+    for t in times:
+        n = int((dur >= t).sum())
+        d = int(((dur == t) & (ev == 1)).sum())
+        c = int(((dur == t) & (ev == 0)).sum())
+        if n > 0 and d > 0:
+            s *= (1 - d / n)
+        t_out.append(float(t)); s_out.append(s)
+        if c > 0:
+            cens.append((float(t), s))
+    return np.array(t_out), np.array(s_out), cens
+
+
+def _logrank(dur, ev, grp):
+    dur = np.asarray(dur, float); ev = np.asarray(ev, int); grp = np.asarray(grp)
+    g1 = grp == np.unique(grp)[0]
+    O1 = E1 = V = 0.0
+    for t in np.array(sorted(set(dur[ev == 1]))):
+        at = dur >= t
+        n = int(at.sum()); n1 = int((at & g1).sum())
+        d = int(((dur == t) & (ev == 1)).sum()); d1 = int(((dur == t) & (ev == 1) & g1).sum())
+        if n > 1:
+            E1 += d * n1 / n
+            V += d * (n1 / n) * (1 - n1 / n) * (n - d) / (n - 1)
+        O1 += d1
+    chi2 = (O1 - E1) ** 2 / V if V > 0 else 0.0
+    return chi2, float(stats.chi2.sf(chi2, 1))
+
+
+def km_from_data(df, time_col, event_col, group_col=None, preset=None, width_mm=None):
+    """Kaplan-Meier survival curves (+ log-rank p for two groups).
+
+    Guards: time/event coerced numeric; event must be 0/1 (censored/event);
+    rows with missing time or event dropped.
+    """
+    warnings = []
+    d = df[[c for c in [time_col, event_col, group_col] if c]].copy()
+    d[time_col] = pd.to_numeric(d[time_col], errors="coerce")
+    d[event_col] = pd.to_numeric(d[event_col], errors="coerce")
+    n0 = len(d); d = d.dropna(subset=[time_col, event_col])
+    if len(d) < n0:
+        warnings.append(f"Dropped {n0 - len(d)} rows missing time/event.")
+    ev = d[event_col].to_numpy()
+    if not set(np.unique(ev)).issubset({0, 1}):
+        warnings.append("Event column should be 0 (censored) / 1 (event); "
+                        "non-zero values treated as events.")
+        d[event_col] = (d[event_col] != 0).astype(int)
+    fig, ax = _new(preset, width_mm, 3.8, 3.2)
+    groups = list(dict.fromkeys(d[group_col].astype(str))) if group_col and group_col in d.columns else [None]
+    for i, g in enumerate(groups):
+        sub = d if g is None else d[d[group_col].astype(str) == g]
+        t, s, cens = _km_estimate(sub[time_col].to_numpy(), sub[event_col].to_numpy())
+        c = OKABE_ITO[i % len(OKABE_ITO)]
+        ax.step(t, s, where="post", color=c, lw=1.4, label=(g or "All"))
+        if cens:
+            ct, cs = zip(*cens)
+            ax.scatter(ct, cs, marker="|", s=30, color=c, zorder=3)
+    ax.set_xlabel(time_col.replace("_", " ")); ax.set_ylabel("Survival probability")
+    ax.set_ylim(0, 1.02)
+    cap = ""
+    if group_col and len(groups) == 2:
+        chi2, p = _logrank(d[time_col].to_numpy(), d[event_col].to_numpy(),
+                           d[group_col].astype(str).to_numpy())
+        from neurofig_core import fmt_p
+        cap = f"log-rank: χ²={chi2:.2f}, p {fmt_p(p)}"
+    if groups != [None]:
+        ax.legend(frameon=False, fontsize=6.5, loc="upper right")
+    if cap:
+        fig.text(0.5, -0.04, cap, ha="center", va="top", fontsize=6.4, color="0.25")
+    fig.tight_layout(); return fig, warnings
+
+
+def kaplan_meier(preset=None, width_mm=None):
+    return km_from_data(sample_km_df(), "time_months", "event", "arm",
+                        preset=preset, width_mm=width_mm)[0]
+
+
+# ---- Forest plot ----
+def forest_from_data(df, label_col, estimate_col, low_col, high_col,
+                     ref=0.0, xlabel="Effect (95% CI)", preset=None, width_mm=None):
+    """Forest plot of effect estimates with 95% CIs (meta-analysis / regression)."""
+    warnings = []
+    d = df[[label_col, estimate_col, low_col, high_col]].copy()
+    for c in [estimate_col, low_col, high_col]:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
+    n0 = len(d); d = d.dropna(subset=[estimate_col, low_col, high_col])
+    if len(d) < n0:
+        warnings.append(f"Dropped {n0 - len(d)} rows with missing estimate/CI.")
+    if d.empty:
+        raise ValueError("No valid rows for the forest plot.")
+    labels = d[label_col].astype(str).tolist()
+    est = d[estimate_col].to_numpy(float); lo = d[low_col].to_numpy(float); hi = d[high_col].to_numpy(float)
+    y = np.arange(len(labels))[::-1]
+    fig, ax = _new(preset, width_mm, 4.0, max(2.4, 0.32 * len(labels) + 1.0))
+    ax.errorbar(est, y, xerr=[est - lo, hi - est], fmt="s", ms=5, color=OKABE_ITO[0],
+                ecolor="0.4", lw=1.0, capsize=2)
+    ax.axvline(ref, color="0.5", ls="--", lw=0.8)
+    ax.set_yticks(y); ax.set_yticklabels(labels, fontsize=6)
+    ax.set_xlabel(xlabel); ax.set_ylim(-0.6, len(labels) - 0.4)
+    fig.tight_layout(); return fig, warnings
+
+
+def forest(preset=None, width_mm=None):
+    return forest_from_data(sample_forest_df(), "study", "estimate", "ci_low", "ci_high",
+                            ref=0.0, preset=preset, width_mm=width_mm)[0]
+
+
+# ---- sample makers ----
+def sample_km_df():
+    rng = np.random.default_rng(42)
+    rows = []
+    for arm, scale, cens in [("Standard", 12, 0.30), ("Experimental", 22, 0.35)]:
+        for _ in range(60):
+            tt = rng.exponential(scale)
+            fu = rng.uniform(6, 40)  # follow-up / censoring time
+            time = min(tt, fu); event = int(tt <= fu and rng.random() > cens)
+            rows.append({"arm": arm, "time_months": round(time, 1), "event": event})
+    return pd.DataFrame(rows)
+
+
+def sample_forest_df():
+    rng = np.random.default_rng(43)
+    studies = ["Anderson 2019", "Brown 2020", "Chen 2020", "Dubois 2021",
+               "Evans 2021", "Farah 2022", "Gupta 2023"]
+    est = rng.normal(0.35, 0.25, len(studies))
+    se = rng.uniform(0.1, 0.3, len(studies))
+    return pd.DataFrame({"study": studies, "estimate": np.round(est, 3),
+                         "ci_low": np.round(est - 1.96 * se, 3),
+                         "ci_high": np.round(est + 1.96 * se, 3)})
+
+
+FIGURES.update({
+    "26 Ridgeline": ridgeline, "27 Chord diagram": chord_diagram,
+    "28 Kaplan-Meier survival": kaplan_meier, "29 Forest plot": forest,
+})
+REAL_DATA_FIGURES.update({"28 Kaplan-Meier survival": "km", "29 Forest plot": "forest"})
