@@ -1003,3 +1003,217 @@ FIGURES.update({
     "24 PCA / ordination": pca_ordination,
     "25 Stacked composition": stacked_composition,
 })
+
+
+# ============================================================================
+# MULTIOMICS real-data versions (upload-driven), inversion-hardened. Each returns
+# (figure, warnings). The gallery sample figures are redefined at the end to
+# delegate here, so drawing lives in one place.
+# ============================================================================
+
+def _draw_upset(sets: dict, preset, width_mm):
+    import itertools
+    names = list(sets)
+    universe = set().union(*sets.values()) if sets else set()
+    combos = []
+    for r in range(1, len(names) + 1):
+        for combo in itertools.combinations(names, r):
+            inter = set(universe)
+            for n in combo:
+                inter &= sets[n]
+            for n in names:
+                if n not in combo:
+                    inter -= sets[n]
+            if len(inter):
+                combos.append((combo, len(inter)))
+    combos.sort(key=lambda x: -x[1]); combos = combos[:14]
+
+    apply_preset(preset) if preset else apply_style()
+    fig = plt.figure(figsize=(5.2, 3.4))
+    if width_mm:
+        set_width_mm(fig, width_mm)
+    gs = fig.add_gridspec(2, 1, height_ratios=[2, 1.2], hspace=0.05)
+    axb = fig.add_subplot(gs[0]); axm = fig.add_subplot(gs[1], sharex=axb)
+    xs = np.arange(len(combos))
+    axb.bar(xs, [c[1] for c in combos], color=OKABE_ITO[0], width=0.6)
+    axb.set_ylabel("Intersection"); axb.spines["bottom"].set_visible(False)
+    axb.tick_params(labelbottom=False)
+    for j, n in enumerate(names):
+        for i, (combo, _) in enumerate(combos):
+            axm.scatter(i, j, s=26, color=OKABE_ITO[0] if n in combo else "0.85", zorder=3)
+    for i, (combo, _) in enumerate(combos):
+        ys = [names.index(n) for n in combo]
+        if len(ys) > 1:
+            axm.plot([i, i], [min(ys), max(ys)], color=OKABE_ITO[0], lw=1.2, zorder=2)
+    axm.set_yticks(range(len(names))); axm.set_yticklabels(names, fontsize=6)
+    axm.set_xticks([]); axm.set_ylim(-0.6, len(names) - 0.4)
+    for sp in ("top", "right", "bottom"):
+        axm.spines[sp].set_visible(False)
+    fig.tight_layout(); return fig
+
+
+def upset_from_data(df, set_cols, preset=None, width_mm=None):
+    """UpSet from >=2 columns, each listing the members of one set."""
+    warnings = []
+    if len(set_cols) < 2:
+        raise ValueError("UpSet needs at least 2 set columns.")
+    sets = {str(c): set(df[c].dropna().astype(str)) for c in set_cols}
+    empty = [k for k, v in sets.items() if not v]
+    if empty:
+        warnings.append(f"Ignored empty set(s): {', '.join(empty)}.")
+        sets = {k: v for k, v in sets.items() if v}
+    if len(sets) < 2:
+        raise ValueError("Need at least 2 non-empty sets.")
+    return _draw_upset(sets, preset, width_mm), warnings
+
+
+def enrichment_from_data(df, term_col, x_col, size_col=None, color_col=None,
+                         preset=None, width_mm=None):
+    """GO/KEGG enrichment dot-plot from a results table.
+
+    Inversion guards: x/size/color coerced to numeric; rows missing term or x
+    dropped; p-values <=0 floored before -log10; empty -> clear error.
+    """
+    warnings = []
+    d = df[[c for c in [term_col, x_col, size_col, color_col] if c]].copy()
+    for c in [x_col, size_col, color_col]:
+        if c:
+            d[c] = pd.to_numeric(d[c], errors="coerce")
+    n0 = len(d); d = d.dropna(subset=[term_col, x_col])
+    if len(d) < n0:
+        warnings.append(f"Dropped {n0 - len(d)} rows missing term or x-value.")
+    if d.empty:
+        raise ValueError("No valid enrichment rows after cleaning.")
+    d = d.sort_values(x_col).tail(25)
+    terms = d[term_col].astype(str).tolist()
+    x = d[x_col].to_numpy(float)
+    size = (d[size_col].to_numpy(float) if size_col else np.full(len(d), 30.0))
+    size = np.nan_to_num(size, nan=np.nanmedian(size) if np.isfinite(np.nanmedian(size)) else 30.0)
+    if color_col:
+        cv = d[color_col].to_numpy(float)
+        if np.nanmin(cv) <= 0:
+            warnings.append("Non-positive p.adjust floored before -log10.")
+            cv = np.where(cv <= 0, np.nanmin(cv[cv > 0]) if np.any(cv > 0) else 1e-300, cv)
+        color = -np.log10(cv); clabel = "-log10 p.adjust"
+    else:
+        color = x; clabel = x_col
+    fig, ax = _new(preset, width_mm, 4.2, max(2.6, 0.28 * len(terms) + 1.2))
+    sc = ax.scatter(x, range(len(terms)), s=np.clip(size * 2.5, 10, 300),
+                    c=color, cmap="viridis", edgecolor="0.3", linewidth=0.4)
+    ax.set_yticks(range(len(terms))); ax.set_yticklabels(terms, fontsize=6)
+    ax.set_xlabel(x_col.replace("_", " "))
+    cb = fig.colorbar(sc, ax=ax, fraction=0.045, pad=0.02); cb.set_label(clabel, fontsize=6)
+    fig.tight_layout(); return fig, warnings
+
+
+def pca_from_data(df, feature_cols, group_col=None, preset=None, width_mm=None):
+    """PCA ordination from a samples x features table.
+
+    Inversion guards: features coerced numeric; constant/all-NaN feature columns
+    dropped; rows with any NaN dropped; needs >=2 features and >=3 samples.
+    """
+    warnings = []
+    X = df[feature_cols].apply(pd.to_numeric, errors="coerce")
+    const = [c for c in feature_cols if X[c].nunique(dropna=True) <= 1]
+    if const:
+        warnings.append(f"Dropped {len(const)} constant/empty feature column(s).")
+        X = X.drop(columns=const)
+    keep = X.dropna()
+    if len(keep) < len(X):
+        warnings.append(f"Dropped {len(X) - len(keep)} samples with missing values.")
+    if X.shape[1] < 2 or len(keep) < 3:
+        raise ValueError("PCA needs >=2 numeric features and >=3 complete samples.")
+    groups = df.loc[keep.index, group_col].astype(str).to_numpy() if group_col and group_col in df.columns else None
+    M = keep.to_numpy(float); M = M - M.mean(0)
+    U, S, Vt = np.linalg.svd(M, full_matrices=False)
+    scores = U * S; var = S ** 2 / (S ** 2).sum()
+    fig, ax = _new(preset, width_mm, 3.8, 3.2)
+    if groups is not None:
+        for i, g in enumerate(dict.fromkeys(groups)):
+            m = groups == g
+            ax.scatter(scores[m, 0], scores[m, 1], s=26, color=OKABE_ITO[i % len(OKABE_ITO)],
+                       label=g, edgecolor="white", linewidth=0.5)
+        ax.legend(frameon=False, fontsize=6.5)
+    else:
+        ax.scatter(scores[:, 0], scores[:, 1], s=26, color=OKABE_ITO[0], edgecolor="white", linewidth=0.5)
+    ax.set_xlabel(f"PC1 ({var[0]*100:.0f}%)"); ax.set_ylabel(f"PC2 ({var[1]*100:.0f}%)")
+    ax.axhline(0, color="0.85", lw=0.6); ax.axvline(0, color="0.85", lw=0.6)
+    fig.tight_layout(); return fig, warnings
+
+
+def stacked_composition_from_data(df, sample_col, category_cols, preset=None, width_mm=None):
+    """Stacked relative-abundance bars from a samples x categories table.
+
+    Inversion guards: categories coerced numeric (NaN->0); all-zero samples
+    dropped; each sample normalised to sum 1.
+    """
+    warnings = []
+    C = df[category_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    labels = df[sample_col].astype(str).tolist() if sample_col in df.columns else [str(i) for i in range(len(df))]
+    tot = C.sum(1)
+    zero = (tot <= 0)
+    if zero.any():
+        warnings.append(f"Dropped {int(zero.sum())} sample(s) with zero total.")
+        C = C[~zero.values]; labels = [l for l, z in zip(labels, zero.values) if not z]; tot = tot[~zero.values]
+    if C.empty:
+        raise ValueError("No samples with non-zero composition.")
+    comp = C.to_numpy(float) / tot.to_numpy(float)[:, None]
+    fig, ax = _new(preset, width_mm, max(3.4, 0.4 * len(labels) + 1.5), 3.0)
+    bottom = np.zeros(len(labels))
+    for j, cat in enumerate(category_cols):
+        ax.bar(range(len(labels)), comp[:, j], bottom=bottom,
+               color=OKABE_ITO[j % len(OKABE_ITO)], label=str(cat), width=0.8)
+        bottom += comp[:, j]
+    ax.set_xticks(range(len(labels))); ax.set_xticklabels(labels, fontsize=6, rotation=90 if len(labels) > 12 else 0)
+    ax.set_ylabel("Relative abundance"); ax.set_ylim(0, 1)
+    ax.legend(frameon=False, fontsize=5.5, ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.2))
+    fig.subplots_adjust(top=0.82)
+    return fig, warnings
+
+
+def sample_upset_df():
+    rng = np.random.default_rng(31)
+    allg = np.array([f"GENE{i:04d}" for i in range(400)])
+    cols = {}
+    for name, n in [("RNA", 160), ("Protein", 150), ("ATAC", 140), ("Methyl", 120), ("Metab", 110)]:
+        cols[name] = sorted(rng.choice(allg, n, replace=False))
+    m = max(len(v) for v in cols.values())
+    return pd.DataFrame({k: v + [None] * (m - len(v)) for k, v in cols.items()})
+
+
+# ---- redefine gallery sample figures to delegate to the from_data drawing ----
+def venn(preset=None, width_mm=None):
+    return venn_from_data(sample_venn_df(), ["RNAseq", "Proteomics", "ATACseq"],
+                          preset=preset, width_mm=width_mm)[0]
+
+
+def upset(preset=None, width_mm=None):
+    return upset_from_data(sample_upset_df(), ["RNA", "Protein", "ATAC", "Methyl", "Metab"],
+                           preset=preset, width_mm=width_mm)[0]
+
+
+def enrichment_dotplot(preset=None, width_mm=None):
+    return enrichment_from_data(sample_enrichment_df(), "term", "gene_ratio", "count",
+                                "p_adjust", preset=preset, width_mm=width_mm)[0]
+
+
+def pca_ordination(preset=None, width_mm=None):
+    df = sample_pca_df()
+    feats = [c for c in df.columns if c.startswith("feature")]
+    return pca_from_data(df, feats, "group", preset=preset, width_mm=width_mm)[0]
+
+
+def stacked_composition(preset=None, width_mm=None):
+    df = sample_composition_df()
+    cats = [c for c in df.columns if c != "sample"]
+    return stacked_composition_from_data(df, "sample", cats, preset=preset, width_mm=width_mm)[0]
+
+
+FIGURES.update({
+    "21 Venn diagram": venn, "22 UpSet plot": upset, "23 Enrichment dot-plot": enrichment_dotplot,
+    "24 PCA / ordination": pca_ordination, "25 Stacked composition": stacked_composition,
+})
+REAL_DATA_FIGURES.update({
+    "21 Venn diagram": "venn", "22 UpSet plot": "upset", "23 Enrichment dot-plot": "enrichment",
+    "24 PCA / ordination": "pca", "25 Stacked composition": "composition",
+})

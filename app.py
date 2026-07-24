@@ -522,7 +522,9 @@ with tab_gallery:
     if choice in jf.REAL_DATA_FIGURES:
         kind = jf.REAL_DATA_FIGURES[choice]
         sample = {"volcano": jf.sample_volcano_df, "raincloud": jf.sample_raincloud_df,
-                  "correlation": jf.sample_correlation_df}[kind]()
+                  "correlation": jf.sample_correlation_df, "venn": jf.sample_venn_df,
+                  "upset": jf.sample_upset_df, "enrichment": jf.sample_enrichment_df,
+                  "pca": jf.sample_pca_df, "composition": jf.sample_composition_df}[kind]()
         st.info("This figure accepts your own data. Download the template to see the "
                 "expected format, or upload a matching file.")
         st.download_button("⬇ Sample template (CSV)", sample.to_csv(index=False),
@@ -561,12 +563,53 @@ with tab_gallery:
                 value_col = c2.selectbox("Value column", [c for c in cols if c != group_col])
                 fig, warns = jf.raincloud_from_data(df, group_col, value_col,
                                                     preset=gpreset, width_mm=gwidth)
-            else:  # correlation
+            elif kind == "correlation":
                 value_cols = st.multiselect("Numeric columns to correlate", cols, default=cols)
                 method = st.selectbox("Method", ["pearson", "spearman", "kendall"])
                 if len(value_cols) < 2:
                     st.warning("Select at least two columns."); st.stop()
                 fig, warns = jf.correlation_heatmap_from_data(df, value_cols, method=method,
+                                                              preset=gpreset, width_mm=gwidth)
+            elif kind == "venn":
+                set_cols = st.multiselect("Set columns (2–3; each lists members)", cols,
+                                          default=cols[:3])
+                if not (2 <= len(set_cols) <= 3):
+                    st.warning("Pick 2 or 3 set columns (use UpSet for more)."); st.stop()
+                fig, warns = jf.venn_from_data(df, set_cols, preset=gpreset, width_mm=gwidth)
+            elif kind == "upset":
+                set_cols = st.multiselect("Set columns (2+; each lists members)", cols, default=cols)
+                if len(set_cols) < 2:
+                    st.warning("Pick at least 2 set columns."); st.stop()
+                fig, warns = jf.upset_from_data(df, set_cols, preset=gpreset, width_mm=gwidth)
+            elif kind == "enrichment":
+                c1, c2 = st.columns(2)
+                term_col = c1.selectbox("Term column", cols)
+                x_col = c2.selectbox("X (gene ratio / score)", [c for c in cols if c != term_col])
+                c3, c4 = st.columns(2)
+                size_col = c3.selectbox("Size column (count, optional)", ["(none)"] + cols)
+                color_col = c4.selectbox("Colour column (p.adjust, optional)", ["(none)"] + cols)
+                fig, warns = jf.enrichment_from_data(
+                    df, term_col, x_col,
+                    size_col=None if size_col == "(none)" else size_col,
+                    color_col=None if color_col == "(none)" else color_col,
+                    preset=gpreset, width_mm=gwidth)
+            elif kind == "pca":
+                group_col = st.selectbox("Group column (for colour, optional)", ["(none)"] + cols)
+                default_feats = [c for c in cols if c not in (group_col, "sample")]
+                feat_cols = st.multiselect("Feature columns (numeric)", cols, default=default_feats)
+                if len(feat_cols) < 2:
+                    st.warning("Select at least 2 feature columns."); st.stop()
+                fig, warns = jf.pca_from_data(
+                    df, feat_cols, group_col=None if group_col == "(none)" else group_col,
+                    preset=gpreset, width_mm=gwidth)
+            else:  # composition
+                sample_col = st.selectbox("Sample-label column", cols)
+                cat_cols = st.multiselect("Category columns (abundances)",
+                                          [c for c in cols if c != sample_col],
+                                          default=[c for c in cols if c != sample_col])
+                if len(cat_cols) < 2:
+                    st.warning("Select at least 2 category columns."); st.stop()
+                fig, warns = jf.stacked_composition_from_data(df, sample_col, cat_cols,
                                                               preset=gpreset, width_mm=gwidth)
         except (ValueError, RuntimeError) as e:
             st.error(str(e)); st.stop()

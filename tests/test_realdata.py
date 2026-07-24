@@ -130,6 +130,47 @@ def test_correlation_bad_method_raises():
         pass
 
 
+def test_upset_needs_two_sets():
+    df = pd.DataFrame({"A": ["g1", "g2"], "B": ["g2", "g3"]})
+    fig, w = jf.upset_from_data(df, ["A", "B"])
+    _ok(fig)
+    try:
+        jf.upset_from_data(df, ["A"]); assert False
+    except ValueError:
+        pass
+
+
+def test_enrichment_floors_bad_padjust():
+    df = pd.DataFrame({"term": ["T1", "T2", "T3"], "ratio": [0.1, 0.2, 0.3],
+                       "count": [5, 10, 15], "padj": [0.0, 1e-4, 0.01]})  # p=0 present
+    fig, w = jf.enrichment_from_data(df, "term", "ratio", "count", "padj")
+    _ok(fig)
+    assert any("floored" in m for m in w)
+
+
+def test_pca_guards():
+    import numpy as np
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(rng.normal(0, 1, (20, 5)), columns=[f"f{i}" for i in range(5)])
+    df["flat"] = 1.0  # constant -> dropped
+    df["group"] = np.repeat(["a", "b"], 10)
+    fig, w = jf.pca_from_data(df, [f"f{i}" for i in range(5)] + ["flat"], "group")
+    _ok(fig)
+    assert any("constant" in m for m in w)
+    try:
+        jf.pca_from_data(df, ["f0"]); assert False   # <2 features
+    except ValueError:
+        pass
+
+
+def test_composition_drops_zero_sample_and_normalizes():
+    df = pd.DataFrame({"sample": ["S1", "S2", "S3"],
+                       "a": [1.0, 0.0, 2.0], "b": [3.0, 0.0, 2.0]})
+    fig, w = jf.stacked_composition_from_data(df, "sample", ["a", "b"])
+    _ok(fig)
+    assert any("zero total" in m for m in w)   # S2 dropped
+
+
 def _run_all():
     passed = 0
     for name, fn in sorted(globals().items()):
